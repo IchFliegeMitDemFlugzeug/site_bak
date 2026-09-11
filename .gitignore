@@ -7,3 +7,6 @@ node_modules/
 # Playwright release-test artifacts.
 test-results/
 playwright-report/
+
+# Local production release packages.
+.release/
