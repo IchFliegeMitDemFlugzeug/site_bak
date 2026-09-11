@@ -1,5 +1,9 @@
-# Исходные фотографии сохранены у владельца проекта и не нужны в опубликованной сборке.
+# Source photos are stored outside the published build.
 Photo/
 
-# Локально установленные зависимости восстанавливаются из package-lock.json.
+# Local dependencies are restored from package-lock.json.
 node_modules/
+
+# Playwright release-test artifacts.
+test-results/
+playwright-report/
