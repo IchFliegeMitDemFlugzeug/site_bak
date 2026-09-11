@@ -1,287 +1,207 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <!-- Кодировка страницы: UTF-8 корректно отображает кириллицу. -->
+  <!-- Базовые метаданные главной страницы. -->
   <meta charset="UTF-8">
-  <!-- Адаптивный viewport: ширина страницы равна ширине экрана устройства. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- Заголовок вкладки браузера. -->
-  <title>БТС — мягкие топливные баки для БВС</title>
-  <!-- Описание страницы для поисковых систем и превью ссылок. -->
-  <meta name="description" content="Разработка, интеграция и изготовление мягких топливных баков для беспилотных воздушных судов.">
-  <!-- Подключаем только наш локальный CSS: внешних библиотек и чужих ресурсов нет. -->
-  <link rel="stylesheet" href="assets/styles.css">
-  <!-- Локальная геометрия сцены интеграции: баки повторяют контуры крыла и фюзеляжа с внутренним отступом. -->
-  <style>
-    .integration-airframe-svg {
-      position: absolute;
-      inset: 3% 1% 2%;
-      width: 98%;
-      height: 95%;
-      overflow: visible;
-    }
+  <title>БТС — бортовые топливные системы для БВС</title>
+  <meta name="description" content="Разработка и изготовление мягких авиационных топливных баков и топливных систем для беспилотных воздушных судов.">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="stylesheet" href="/assets/vendor/photoswipe/photoswipe.css">
+  <link rel="stylesheet" href="/assets/styles.css?v=10.8">
+  <link rel="stylesheet" href="/assets/design-system.css?v=10.8">
 
-    .integration-airframe-svg .airframe-silhouette {
-      fill: rgba(255,255,255,.012);
-      stroke: #858d95;
-      stroke-width: 1.8;
-      vector-effect: non-scaling-stroke;
-    }
+  <!-- BTS SEO START -->
+  <link rel="canonical" href="https://btsys.ru/">
 
-    .integration-airframe-svg .airframe-centerline,
-    .integration-airframe-svg .airframe-bay-line {
-      fill: none;
-      stroke: rgba(133,141,149,.34);
-      stroke-width: 1;
-      stroke-dasharray: 5 7;
-      vector-effect: non-scaling-stroke;
-    }
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:site_name" content="БТС — Бортовые топливные системы">
+  <meta property="og:title" content="БТС — бортовые топливные системы для БВС">
+  <meta property="og:description" content="Разработка и изготовление мягких авиационных топливных баков и топливных систем для беспилотных воздушных судов.">
+  <meta property="og:url" content="https://btsys.ru/">
+  <meta property="og:image" content="https://btsys.ru/assets/images/hero-tank.webp">
+  <meta property="og:image:type" content="image/webp">
+  <meta property="og:image:width" content="1800">
+  <meta property="og:image:height" content="1351">
 
-    /* Сбрасываем прямоугольную геометрию старых div-баков: теперь это точные SVG-контуры. */
-    .integration-airframe-svg .fuel-zone {
-      position: static;
-      width: auto;
-      height: auto;
-      left: auto;
-      right: auto;
-      top: auto;
-      background: none;
-      border: 0;
-      border-radius: 0;
-      box-shadow: 0 0 48px rgba(124,180,220,.20);
-      fill: rgba(124,180,220,.90);
-      stroke: rgba(218,239,252,.95);
-      stroke-width: 1.5;
-      vector-effect: non-scaling-stroke;
-      transform-box: fill-box;
-      transform-origin: center;
-      opacity: 0;
-      transform: scale(.72);
-    }
-
-    /* Левый и правый баки ориентируются от корня крыла: при появлении визуально «раскрываются» наружу. */
-    .integration-airframe-svg .fuel-zone--left { transform-origin: 100% 50%; }
-    .integration-airframe-svg .fuel-zone--right { transform-origin: 0% 50%; }
-    .integration-airframe-svg .fuel-zone--center { transform-origin: 50% 50%; }
-
-    .integration-airframe-svg .tank-seam-svg {
-      fill: none;
-      stroke: rgba(255,255,255,.25);
-      stroke-width: 1;
-      stroke-dasharray: 3 5;
-      vector-effect: non-scaling-stroke;
-      pointer-events: none;
-    }
-
-    @media (max-width: 780px) {
-      .integration-airframe-svg { inset: 4% -5% 1%; width: 110%; height: 95%; }
-    }
-  </style>
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="БТС — бортовые топливные системы для БВС">
+  <meta name="twitter:description" content="Разработка и изготовление мягких авиационных топливных баков и топливных систем для беспилотных воздушных судов.">
+  <meta name="twitter:image" content="https://btsys.ru/assets/images/hero-tank.webp">
+  <!-- BTS SEO END -->
 </head>
-<body>
-  <!-- Верхняя навигация. Она остаётся компактной и не перекрывает основное повествование. -->
-  <header class="site-header" data-header>
-    <a class="brand" href="#top" aria-label="БТС — на главную">
-      <!-- Реальный логотип БТС из PNG-файла, лежащего рядом с index.html. -->
-      <img src="BTS_logotip_png.png" alt="БТС — Бортовые топливные системы" style="display:block;width:170px;max-width:32vw;height:auto;object-fit:contain;">
-    </a>
-    <nav class="nav" aria-label="Основная навигация">
-      <a href="#solutions">Решения</a>
-      <a href="#integration">Интеграция</a>
-      <a href="#process">Процесс</a>
-      <a href="#contact" class="nav__cta">Обсудить проект</a>
-    </nav>
-  </header>
+
+<!-- Атрибут data-page сообщает общему сценарию, какой пункт постоянной навигации активен. -->
+<body data-page="home">
+  <!-- Шапка, подвал и диалоговые окна формируются одним общим сценарием на всех страницах. -->
+  <div data-site-header></div>
 
   <main id="top">
-    <!-- Первый экран: крупная типографика, много воздуха, один сильный объект. -->
-    <section class="hero section" aria-labelledby="hero-title">
-      <div class="hero__grid"></div>
-      <div class="hero__copy reveal">
+    <!-- Первый экран сохранён по композиции; процедурные облака монтируются только в этот блок. -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero__grid" aria-hidden="true"></div>
+
+      <div class="hero__copy">
         <p class="eyebrow">МЯГКИЕ ТОПЛИВНЫЕ БАКИ / БВС</p>
         <h1 id="hero-title">Топливная система,<br>которая вписывается<br><span>в конструкцию.</span></h1>
-        <p class="hero__lead">Разработка бака под конкретный топливный отсек, согласование интерфейсов и сопровождение интеграции в состав БВС.</p>
-        <a class="text-link" href="#integration">Как мы интегрируем <span aria-hidden="true">↘</span></a>
+        <p class="hero__lead">Разработка бака под конкретный топливный отсек, согласование конструкции и сопровождение интеграции в состав БВС.</p>
       </div>
 
-      <!-- Абстрактная иллюстрация собственного производства: никаких чужих фотографий или 3D-моделей. -->
-      <div class="hero-object" data-parallax="0.16" aria-label="Схематичное изображение мягкого топливного бака" role="img">
-        <div class="tank-shadow"></div>
-        <div class="tank-shell">
-          <div class="tank-seam tank-seam--top"></div>
-          <div class="tank-seam tank-seam--side"></div>
-          <div class="tank-fitting tank-fitting--a"></div>
-          <div class="tank-fitting tank-fitting--b"></div>
-          <div class="tank-fitting tank-fitting--c"></div>
-          <div class="tank-plate"></div>
-        </div>
-        <div class="hero-object__label">Концептуальная визуализация / заменить на фото изделия</div>
-      </div>
+      <!-- Кнопка сохраняет исходные пиксели изделия и открывает эту же фотографию в матовом полноэкранном окне. -->
+      <button class="hero-object" type="button" data-lightbox data-lightbox-src="/assets/images/hero-tank.webp" aria-label="Открыть фотографию мягкого топливного бака на весь экран">
+        <img class="hero-object__image" src="/assets/images/hero-tank.webp" alt="Мягкий топливный бак БТС индивидуальной геометрии" width="1800" height="1351" fetchpriority="high" decoding="async">
+      </button>
 
-      <div class="hero-stat reveal" data-counter-wrap>
-        <span class="hero-stat__value" data-counter="3">0</span>
-        <span class="hero-stat__unit">направления работ</span>
-        <span class="hero-stat__caption">разработка · интеграция · изготовление</span>
-      </div>
-      <div class="scroll-cue">Прокрутите <span>↓</span></div>
     </section>
 
-    <!-- Нумерованный блок направлений: идея последовательного каталога, но контент и композиция оригинальные. -->
-    <section class="solutions section" id="solutions" aria-labelledby="solutions-title">
-      <div class="section-heading reveal">
-        <p class="eyebrow">01 — 03 / КОМПЕТЕНЦИИ</p>
-        <h2 id="solutions-title">Один бак —<br>часть всей системы.</h2>
-      </div>
+    <!-- Блок ответственности БТС: основа главной страницы и точка возврата из раздела продукции. -->
+    <section class="editorial-section responsibility" id="responsibility" aria-labelledby="responsibility-title">
+      <div class="section-shell">
+        <p class="eyebrow reveal">ИНЖЕНЕРНАЯ РАЗРАБОТКА / ПОД КЛЮЧ</p>
+        <h2 class="display-heading reveal" id="responsibility-title">Ваша топливная система —<br><span>наша задача.</span></h2>
 
-      <div class="solution-list">
-        <article class="solution-row reveal">
-          <div class="solution-row__index">01</div>
-          <div class="solution-row__title">Разработка</div>
-          <p>Форма, объём, расположение штуцеров, технологические ограничения и эксплуатационные требования увязываются ещё до выпуска КД.</p>
-          <span class="solution-row__arrow">↗</span>
-        </article>
-        <article class="solution-row reveal">
-          <div class="solution-row__index">02</div>
-          <div class="solution-row__title">Интеграция</div>
-          <p>Прорабатываем топливный отсек, опоры, трассировку магистралей, дренаж и доступность монтажа совместно с конструкторской группой БВС.</p>
-          <span class="solution-row__arrow">↗</span>
-        </article>
-        <article class="solution-row reveal">
-          <div class="solution-row__index">03</div>
-          <div class="solution-row__title">Изготовление</div>
-          <p>Переходим от согласованной геометрии к оснастке, опытному образцу, проверке и повторяемому изготовлению изделий.</p>
-          <span class="solution-row__arrow">↗</span>
-        </article>
-      </div>
-    </section>
-
-    <!-- Тёмная иммерсивная сцена: sticky-композиция и scroll-linked движение собственной схемы. -->
-    <section class="integration" id="integration" aria-labelledby="integration-title">
-      <div class="integration__sticky">
-        <div class="integration__copy reveal-dark">
-          <p class="eyebrow eyebrow--dark">ИНТЕГРАЦИЯ В БВС</p>
-          <h2 id="integration-title">Не помещаем бак<br>в готовый отсек.<br><span>Проектируем вместе.</span></h2>
-          <p>Мягкий бак раскрывает преимущество только тогда, когда геометрия отсека, крепление, штуцеры и эксплуатация рассматриваются как единая задача.</p>
+        <div class="responsibility__statement reveal">
+          <p>Вы разрабатываете БВС.</p>
+          <p class="metal-text">Топливную систему мы забираем на себя.</p>
         </div>
 
-        <div class="integration-visual" data-integration-visual>
-          <!-- Вид БВС сверху. Контур и баки построены в одной системе координат, поэтому баки геометрически лежат внутри планера. -->
-          <svg class="integration-airframe-svg" viewBox="0 0 1000 620" role="img" aria-label="Схема интеграции трёх мягких топливных баков в крыло и фюзеляж БВС">
-            <!-- Общий наружный контур условного БВС самолётного типа. -->
-            <path class="airframe-silhouette" d="M500 34 C522 55 532 88 536 138 L544 208 L922 295 L902 354 L556 302 L550 474 L654 530 L650 567 L522 540 L500 590 L478 540 L350 567 L346 530 L450 474 L444 302 L98 354 L78 295 L456 208 L464 138 C468 88 478 55 500 34 Z"/>
-
-            <!-- Оси и условные границы топливных отсеков помогают считывать компоновку. -->
-            <path class="airframe-centerline" d="M500 54 L500 570"/>
-            <path class="airframe-bay-line" d="M455 218 L112 306 M545 218 L888 306"/>
-            <path class="airframe-bay-line" d="M447 288 L132 339 M553 288 L868 339"/>
-
-            <!-- Левый бак: повторяет стреловидность передней и задней кромок крыла, оставляя заметный технологический зазор. -->
-            <path class="fuel-zone fuel-zone--left" d="M443 230 L143 303 L151 331 L445 286 Z"/>
-            <!-- Правый бак зеркален левому и также полностью находится внутри контура крыла. -->
-            <path class="fuel-zone fuel-zone--right" d="M557 230 L857 303 L849 331 L555 286 Z"/>
-            <!-- Центральный бак повторяет сужение фюзеляжа: нос уже, средняя часть шире, хвост снова сужается. -->
-            <path class="fuel-zone fuel-zone--center" d="M482 112 C486 88 492 72 500 62 C508 72 514 88 518 112 L525 205 L523 412 L516 480 L500 522 L484 480 L477 412 L475 205 Z"/>
-
-            <!-- Тонкие условные швы дают понять, что это именно мягкие баки, а не сплошная заливка отсека. -->
-            <path class="tank-seam-svg" d="M426 247 L164 310"/>
-            <path class="tank-seam-svg" d="M574 247 L836 310"/>
-            <path class="tank-seam-svg" d="M486 203 L514 203 M484 405 L516 405"/>
-          </svg>
-
-          <div class="integration-label integration-label--1">Топливный отсек</div>
-          <div class="integration-label integration-label--2">Мягкий бак</div>
-          <div class="integration-label integration-label--3">Интерфейсы</div>
-        </div>
-
-        <div class="integration-progress" aria-hidden="true">
-          <span>00</span>
-          <div class="integration-progress__track"><div data-progress-bar></div></div>
-          <span>100</span>
+        <div class="responsibility__details reveal">
+          <p class="lead-line">Проектирование. Изготовление. Испытания. Сопровождение.</p>
+          <p>От исходных требований до готового изделия — наша задача и зона ответственности.</p>
+          <a class="text-link" href="/products/#system">Продукция <span aria-hidden="true">↗</span></a>
         </div>
       </div>
     </section>
 
-    <!-- Большие технические показатели: без неподтверждённых рекламных обещаний. -->
-    <section class="metrics section" aria-labelledby="metrics-title">
-      <div class="section-heading reveal">
-        <p class="eyebrow">СИСТЕМНЫЙ ПОДХОД</p>
-        <h2 id="metrics-title">Геометрия.<br>Интерфейсы.<br>Эксплуатация.</h2>
-      </div>
-      <div class="metric-grid">
-        <article class="metric-card reveal">
-          <div class="metric-card__number">01</div>
-          <h3>Компоновка</h3>
-          <p>Использование доступного объёма без необходимости строить бак вокруг стандартной жёсткой формы.</p>
-        </article>
-        <article class="metric-card reveal">
-          <div class="metric-card__number">02</div>
-          <h3>Штуцеры</h3>
-          <p>Расположение интерфейсов определяется компоновкой конкретного воздушного судна и доступом при обслуживании.</p>
-        </article>
-        <article class="metric-card reveal">
-          <div class="metric-card__number">03</div>
-          <h3>Сопровождение</h3>
-          <p>Конструктивные изменения по результатам примерки и испытаний возвращаются в изделие, а не остаются проблемой сборочного участка.</p>
-        </article>
-      </div>
-    </section>
-
-    <!-- Продуктовая история: крупная карточка и два меньших направления. -->
-    <section class="product-story section" aria-labelledby="product-title">
-      <div class="product-story__intro reveal">
-        <p class="eyebrow">БТС / ПРОДУКТ</p>
-        <h2 id="product-title">Мягкий бак как<br>элемент конструкции БВС.</h2>
-      </div>
-      <div class="product-stage reveal">
-        <div class="product-stage__media">
-          <div class="product-stage__placeholder">ФОТО ИЗДЕЛИЯ<br><small>здесь ставится ваше исходное фото без генеративного изменения объекта</small></div>
+    <!-- Интеграция описывается типографикой без фотографии, как указано в исходном документе. -->
+    <section class="editorial-section integration-copy" id="integration" aria-labelledby="integration-copy-title">
+      <div class="section-shell split-copy">
+        <div>
+          <p class="eyebrow reveal">ИНТЕГРАЦИЯ / БВС</p>
+          <h2 class="display-heading reveal" id="integration-copy-title">Бак — только<br><span>часть задачи.</span></h2>
         </div>
-        <div class="product-stage__copy">
-          <p class="product-stage__kicker">Индивидуальная геометрия</p>
-          <h3>Проектируем под пространство, которое уже есть в аппарате.</h3>
-          <p>Вместо выбора ближайшего типоразмера исходной точкой становится реальная геометрия топливного отсека и требования конкретного проекта.</p>
-          <a class="text-link" href="#contact">Обсудить исходные данные <span>↗</span></a>
+
+        <div class="split-copy__body reveal">
+          <p class="body-lead">Мы берём на себя разработку бака и его интеграцию в топливный отсек.</p>
+          <p>Подключаемся к готовой конструкции или начинаем вместе с вами на стадии эскизного проекта.</p>
+          <p class="oversize-note">Чем раньше мы подключимся — тем глубже сможем увязать топливную систему с конструкцией БВС. Это позволит эффективней использовать внутренний объём БВС и не тратить время на доработки.</p>
+          <a class="text-link" href="/products/#integration">Как проходит интеграция <span aria-hidden="true">↗</span></a>
         </div>
       </div>
     </section>
 
-    <!-- Горизонтальная лента процесса, перемещающаяся при вертикальной прокрутке. -->
-    <section class="process" id="process" aria-labelledby="process-title">
-      <div class="process__sticky">
-        <div class="process__heading">
-          <p class="eyebrow eyebrow--dark">ПРОЦЕСС</p>
-          <h2 id="process-title">От компоновки<br>до изделия.</h2>
+    <!-- Бизнес-результат разбит на три равнозначных направления: сроки, объём и затраты. -->
+    <section class="editorial-section result-section" id="time" aria-labelledby="result-title">
+      <div class="section-shell">
+        <p class="eyebrow reveal">РЕЗУЛЬТАТ / ДЛЯ ПРОЕКТА</p>
+        <h2 class="display-heading reveal" id="result-title">Больше топлива.<br><span>Меньше времени на разработку топливной системы.</span></h2>
+
+        <div class="result-grid">
+          <article class="result-card reveal">
+            <span>01</span>
+            <h3>Сроки</h3>
+            <p>Мы ведём топливную систему параллельно с вашей разработкой БВС и помогаем уложиться в сжатые сроки проекта. При необходимости разработаем ТЗ сами и представим его для согласования.</p>
+            <strong>Вы двигаете проект дальше. Мы закрываем свою часть.</strong>
+          </article>
+
+          <article class="result-card reveal">
+            <span>02</span>
+            <h3>Объём</h3>
+            <p>Мягкий бак проектируется под доступное пространство.</p>
+            <strong>Эффективность использования объёма — больше топлива на борту.</strong>
+          </article>
+
+          <article class="result-card reveal">
+            <span>03</span>
+            <h3>Затраты</h3>
+            <p>Разработка топливной системы потребует вашего времени, опытных образцов, испытаний и доводки.</p>
+            <strong>Нам этот путь уже известен. Вам не придётся проходить его с нуля.</strong>
+          </article>
         </div>
-        <div class="process-track" data-process-track>
-          <article class="process-card"><span>01</span><h3>Исходные данные</h3><p>Геометрия отсека, требуемый объём, ограничения по интерфейсам и монтажу.</p></article>
-          <article class="process-card"><span>02</span><h3>Компоновка</h3><p>Форма бака и размещение узлов согласуются с конструкцией БВС.</p></article>
-          <article class="process-card"><span>03</span><h3>Опытный образец</h3><p>Изготовление, примерка, корректировки и подготовка к проверкам.</p></article>
-          <article class="process-card"><span>04</span><h3>Проверка</h3><p>Контроль герметичности и испытания по согласованной программе.</p></article>
-          <article class="process-card"><span>05</span><h3>Поставка</h3><p>Повторяемое изготовление и инженерное сопровождение изделия.</p></article>
+
+        <div class="future-visual reveal" aria-hidden="true">
+          <span></span>
+          <span></span>
         </div>
+
+        <a class="text-link section-link" href="/products/#development">Подробнее о разработке <span aria-hidden="true">↗</span></a>
       </div>
     </section>
 
-    <!-- Финальный CTA с большим контрастом и коротким техническим сообщением. -->
-    <section class="contact section" id="contact" aria-labelledby="contact-title">
-      <div class="contact__content reveal">
-        <p class="eyebrow">НАЧАТЬ ПРОЕКТ</p>
-        <h2 id="contact-title">Покажите нам<br>топливный отсек.</h2>
-        <p>Для первого обсуждения достаточно компоновки, ориентировочного объёма и основных ограничений по установке.</p>
-        <a class="contact-button" href="mailto:info@btsystems.ru">info@btsystems.ru <span>↗</span></a>
+    <!-- Производственный блок использует реальные фотографии без генеративного изменения изделий и материалов. -->
+    <section class="editorial-section production-section" aria-labelledby="production-title">
+      <div class="section-shell">
+        <p class="eyebrow reveal">ПРОИЗВОДСТВО / КОНТРОЛЬ / ДОКУМЕНТЫ</p>
+        <h2 class="display-heading reveal" id="production-title">Российское производство.<br><span>Подтверждаемый результат.</span></h2>
+
+        <div class="production-layout">
+          <div class="production-copy">
+            <article class="text-block reveal">
+              <h3>Российское производство</h3>
+              <p>Мы разрабатываем и производим баки в России. Все используемые материалы — российского производства, с паспортами и нормативно-технической документацией.</p>
+            </article>
+            <article class="text-block reveal">
+              <h3>Российское происхождение</h3>
+              <p>Производственная и материальная база позволяет проходить процедуры подтверждения российского происхождения продукции. В зависимости от классификации изделия возможно оформление сертификата СТ-1 либо прохождение процедуры подтверждения производства российской промышленной продукции по ПП РФ № 719.</p>
+            </article>
+            <article class="text-block reveal">
+              <h3>Контроль</h3>
+              <p>Готовое изделие проходит контроль. Для серийной продукции предусматривается индивидуальный паспорт изделия с описанными результатами проверок и идентификацией по серийному номеру.</p>
+            </article>
+            <article class="text-block reveal">
+              <h3>Комплектность образцов</h3>
+              <p>Бак. Паспорт изделия. Инструкции по сборке и эксплуатации. Сопроводительная документация.</p>
+              <p>По требованиям договора — дополнительные материалы, включая фото- и видеофиксацию проверок.</p>
+            </article>
+          </div>
+
+          <div class="production-media reveal">
+            <button class="image-card image-card--large" type="button" data-lightbox aria-label="Открыть фотографию мягкого топливного бака и съёмного узла крышки">
+              <img src="/assets/media/product-hero.webp" alt="Мягкий топливный бак и съёмный узел крышки" width="2048" height="1365" loading="lazy" decoding="async">
+            </button>
+            <button class="image-card" type="button" data-lightbox aria-label="Открыть фотографию российского прорезиненного материала">
+              <img src="/assets/media/rubberized-fabric.webp" alt="Край российского прорезиненного материала оболочки" width="1440" height="1440" loading="lazy" decoding="async">
+            </button>
+          </div>
+        </div>
+
+        <a class="text-link section-link" href="/products/#testing">Испытания и документация <span aria-hidden="true">↗</span></a>
       </div>
-      <div class="contact__orb" data-parallax="-0.08"></div>
+    </section>
+
+    <!-- Финальный призыв открывает общую форму обратной связи. -->
+    <section class="editorial-section start-section" aria-labelledby="start-title">
+      <div class="section-shell start-layout reveal">
+        <div>
+          <p class="eyebrow">ПЕРВЫЙ КОНТАКТ</p>
+          <h2 class="display-heading" id="start-title">Для начала достаточно<br><span>описать задачу словами.</span></h2>
+        </div>
+
+        <div class="start-layout__body">
+          <p class="fact-list">Тип БВС.<br>Силовая установка.<br>Примерный объём топлива.<br>Место установки бака.</p>
+          <p>Этого достаточно для первого разговора.</p>
+          <p class="lead-line">Начнём с задачи.</p>
+          <button class="primary-button" type="button" data-contact-open>Обсудить проект <span aria-hidden="true">↗</span></button>
+          <p class="service-note">Можно начать с нескольких предложений. Чертежи и модели на первом этапе не требуются.</p>
+        </div>
+      </div>
     </section>
   </main>
 
-  <!-- Простой подвал без чужих логотипов и ссылок. -->
-  <footer class="footer">
-    <div>БТС / Бортовые топливные системы</div>
-    <div>Мягкие топливные баки для БВС</div>
-    <div>© 2026</div>
-  </footer>
+  <div data-site-footer></div>
+  <div data-site-overlays></div>
 
-  <!-- Подключаем только наш локальный JavaScript. -->
-  <script src="assets/main.js"></script>
+  <!-- Общая логика сайта загружается до отдельного модуля процедурных облаков. -->
+  <script src="/assets/site-architecture.js?v=10.8"></script>
+  <script src="/assets/vendor/photoswipe/photoswipe.umd.min.js"></script>
+  <script src="/assets/vendor/photoswipe/photoswipe-lightbox.umd.min.js"></script>
+  <script src="/assets/main.js?v=10.8"></script>
+  <script type="module" src="/assets/btsCloudBackground-init.js"></script>
 </body>
 </html>
