@@ -1,0 +1,12 @@
+<configuration>
+    <system.webServer>
+        <rewrite>
+            <rules>
+                <rule name="Contact API reverse proxy" stopProcessing="true">
+                    <match url="^api/contact$" />
+                    <action type="Rewrite" url="http://127.0.0.1:3001/api/contact" />
+                </rule>
+            </rules>
+        </rewrite>
+    </system.webServer>
+</configuration>

@@ -10,3 +10,6 @@ playwright-report/
 
 # Local production release packages.
 .release/
+
+# Local SMTP credentials for the contact API must never be committed.
+.env
