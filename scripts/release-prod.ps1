@@ -222,9 +222,7 @@ if ($lastexitcode -ne 0) {
     throw 'production ssh is unavailable. DryRun and live release require it for component state; disable AmneziaVPN on Selectel'
 }
 
-$frontendtree = (& $git rev-parse 'HEAD:dist').trim()
-$backendtree = (& $git rev-parse 'HEAD:backend').trim()
-$statecommand = "powershell.exe -noprofile -command `"`$s='C:\ProgramData\BTS\deploy\state';[pscustomobject]@{frontend_tree=if(test-path (`$s+'\current-frontend-tree.txt')){(gc (`$s+'\current-frontend-tree.txt') -raw).trim()}else{''};frontend_commit=if(test-path (`$s+'\current-commit.txt')){(gc (`$s+'\current-commit.txt') -raw).trim()}else{''};backend_tree=if(test-path (`$s+'\current-backend-tree.txt')){(gc (`$s+'\current-backend-tree.txt') -raw).trim()}else{''}}|convertto-json -compress`""
+$statecommand = "powershell.exe -noprofile -command `"`$s='C:\ProgramData\BTS\deploy\state';[pscustomobject]@{schema_version=if(test-path (`$s+'\deployment-schema-version.txt')){(gc (`$s+'\deployment-schema-version.txt') -raw).trim()}else{''};frontend_tree=if(test-path (`$s+'\current-frontend-tree.txt')){(gc (`$s+'\current-frontend-tree.txt') -raw).trim()}else{''};frontend_commit=if(test-path (`$s+'\current-commit.txt')){(gc (`$s+'\current-commit.txt') -raw).trim()}else{''};backend_tree=if(test-path (`$s+'\current-backend-tree.txt')){(gc (`$s+'\current-backend-tree.txt') -raw).trim()}else{''}}|convertto-json -compress`""
 $productionstatejson = @(& ssh.exe @sshargs $remote $statecommand)
 
 if ($lastexitcode -ne 0 -or $productionstatejson.count -eq 0) {
@@ -232,6 +230,15 @@ if ($lastexitcode -ne 0 -or $productionstatejson.count -eq 0) {
 }
 
 $productionstate = ($productionstatejson -join "`n") | convertfrom-json
+
+# Selective manifests are understood only by worker v2. This guard runs before
+# hashes, preflight, packaging or uploads, so an unmigrated production is untouched.
+if ([string]$productionstate.schema_version -ne '2') {
+    throw 'Production two-component migration is required before release.'
+}
+
+$frontendtree = (& $git rev-parse 'HEAD:dist').trim()
+$backendtree = (& $git rev-parse 'HEAD:backend').trim()
 $productionfrontendtree = [string]$productionstate.frontend_tree
 
 if (-not $productionfrontendtree -and [string]$productionstate.frontend_commit -match '^[0-9a-f]{40}$') {

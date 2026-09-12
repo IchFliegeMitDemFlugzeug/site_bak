@@ -1154,7 +1154,7 @@ IIS URL Rewrite + ARR хранит постоянное site-level правил�
 
 ### 31.3. Версии, selective deploy и state
 
-Локальные версии — `git rev-parse HEAD:dist` и `git rev-parse HEAD:backend`. Production хранит `current-frontend-tree.txt`, `current-frontend-commit.txt`, `current-backend-tree.txt`, `current-backend-commit.txt`, `current-backend-release.txt`. Старые `current-release.txt` и `current-commit.txt` сохраняют значение frontend path/commit.
+Локальные версии — `git rev-parse HEAD:dist` и `git rev-parse HEAD:backend`. Production хранит marker `deployment-schema-version.txt` со значением `2`, а также `current-frontend-tree.txt`, `current-frontend-commit.txt`, `current-backend-tree.txt`, `current-backend-commit.txt`, `current-backend-release.txt`. Старые `current-release.txt` и `current-commit.txt` сохраняют значение frontend path/commit. Пока marker отсутствует или отличается от `2`, новый release-клиент немедленно останавливается до preflight, упаковки и любых production-изменений.
 
 Компонент с совпавшим tree получает настоящий `SKIP`: без `npm ci`, упаковки, upload, новой release-папки, switch/restart и state update. Если оба совпали, release завершает `PASS: nothing changed`. Для точного плана `-DryRun` читает production state через SSH, поэтому также требует доступного SSH и выключенного AmneziaVPN на Selectel.
 

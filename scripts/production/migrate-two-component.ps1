@@ -88,4 +88,7 @@ if ($LASTEXITCODE -ne 0 -or (($health | Out-String).Trim() -ne '{"ok":true}')) {
 Set-Content (Join-Path $state 'current-backend-release.txt') $initialRelease -NoNewline
 Set-Content (Join-Path $state 'current-backend-tree.txt') $InitialBackendTree -NoNewline
 Set-Content (Join-Path $state 'current-backend-commit.txt') $InitialBackendCommit -NoNewline
+# Marker is deliberately last: release-prod.ps1 must remain blocked until every
+# migration action and backend health check above has completed successfully.
+Set-Content (Join-Path $state 'deployment-schema-version.txt') '2' -NoNewline
 Write-Host "PASS. Migration backup: $backupRoot"

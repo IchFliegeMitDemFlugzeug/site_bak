@@ -15,7 +15,7 @@ if (Test-Path 'C:\Sites\BTS\backend-current') { cmd.exe /d /c 'rmdir "C:\Sites\B
 if ($metadata.backend_current) { cmd.exe /d /c "mklink /J `"C:\Sites\BTS\backend-current`" `"$($metadata.backend_current)`"" | Out-Null }
 if (Test-Path (Join-Path $BackupRoot 'worker.ps1')) { Copy-Item (Join-Path $BackupRoot 'worker.ps1') 'C:\ProgramData\BTS\deploy\worker.ps1' -Force }
 $stateRoot = 'C:\ProgramData\BTS\deploy\state'
-foreach ($stateName in @('current-frontend-tree.txt','current-frontend-commit.txt','current-backend-tree.txt','current-backend-commit.txt','current-backend-release.txt')) {
+foreach ($stateName in @('deployment-schema-version.txt','current-frontend-tree.txt','current-frontend-commit.txt','current-backend-tree.txt','current-backend-commit.txt','current-backend-release.txt')) {
     Remove-Item (Join-Path $stateRoot $stateName) -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path (Join-Path $BackupRoot 'state')) { Copy-Item (Join-Path $BackupRoot 'state\*') $stateRoot -Recurse -Force }
