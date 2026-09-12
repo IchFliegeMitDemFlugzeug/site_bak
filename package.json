@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "node build.mjs",
-    "contact-api": "node server/contact-api.js",
     "test:stage": "playwright test",
     "preflight": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/preflight.ps1"
   },
@@ -17,9 +16,6 @@
   },
   "dependencies": {
     "@fontsource-variable/onest": "^5.3.1",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.1.0",
-    "nodemailer": "^7.0.6",
     "photoswipe": "^5.4.4"
   }
 }
