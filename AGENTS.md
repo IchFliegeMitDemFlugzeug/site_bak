@@ -1,73 +1,260 @@
 # Правила работы с проектом БТС
 
-## 1. Источник истины
+Этот файл содержит обязательные правила для ChatGPT, Codex, Sites и других агентов, работающих с репозиторием сайта БТС.
 
-Перед изменениями `dist/`, `backend/`, staging, production, IIS, release, SSH/SCP, worker или rollback обязательно прочитать `INFRASTRUCTURE.md`. Если фактическая инфраструктура намеренно меняется, одновременно обновлять этот файл и `INFRASTRUCTURE.md`.
+## 1. Каноническое описание инфраструктуры
 
-## 2. Два независимых компонента
+Перед любыми изменениями, связанными с публикацией сайта, `dist/`, staging, production, IIS, Git/GitHub-процессом, release-скриптами, SSH/SCP, проверками перед публикацией, rollback или серверными путями, обязательно прочитать `INFRASTRUCTURE.md`.
 
-Frontend — статический готовый артефакт `dist/`. Backend — самостоятельный готовый компонент `backend/`. Их версии определяются Git tree hash: `HEAD:dist` и `HEAD:backend`.
+`INFRASTRUCTURE.md` является каноническим техническим описанием текущей инфраструктуры. Если фактическая инфраструктура была намеренно изменена, нужно одновременно обновить `INFRASTRUCTURE.md`.
 
-`npm run build` собирает только frontend. В `dist/` запрещены backend, Node runtime, `node_modules`, SMTP-конфигурация, `.env`, WinSW и backend release-файлы. Backend-зависимости принадлежат только `backend/package.json` и устанавливаются на staging через `npm ci --prefix backend --omit=dev`.
+Не придумывать новую схему публикации, пока существующая рабочая схема не изучена и явно не признана неподходящей.
 
-Компонент с совпавшим production tree hash нельзя упаковывать, загружать, переключать, перезапускать или записывать в state. При отсутствии изменений обоих компонентов release ничего не публикует.
+## 2. Главный принцип публикации
 
-## 3. Проверенная публикация
+Production получает только тот `dist/`, который:
 
-Frontend и backend могут попасть в production только после commit, ручного Pull через GitHub Desktop на немецком сервере, проверки `https://stage.btsys.ru`, preflight/Playwright и совпадения локального HEAD с `origin/main`. Автодеплой и автоматический `git pull` запрещены.
+1. собран из исходников;
+2. сохранён в Git вместе с соответствующими исходниками;
+3. вручную получен на немецком staging-сервере через GitHub Desktop;
+4. реально показан на `https://stage.btsys.ru`;
+5. визуально проверен пользователем;
+6. прошёл автоматический preflight и Playwright;
+7. связан с конкретным Git commit;
+8. передан на production без пересборки на production-сервере.
 
-Основная ветка — `main`. Перед release дерево чистое; `release-prod.ps1` делает fetch, но не pull. Merge/rebase/force/reset/clean автоматически не выполнять.
+Автодеплоя по `git push` нет и добавлять его без отдельного решения пользователя нельзя.
 
-## 4. Frontend artifact
+## 3. Правила работы с Git
 
-После изменения сайта: изменить исходники, выполнить `npm run build`, проверить `dist/`, включить исходники и соответствующий `dist/` в один commit. Не исправлять только `dist/`.
+Основная ветка: `main`.
 
-`dist/` production-safe и одинаков для staging/production. В нём запрещены `stage.btsys.ru`, `localhost`, `127.0.0.1`, локальные пути и staging noindex. `404.html` имеет собственный noindex. Не ломать `.webp`, security headers, CSP и 404 в `web.config`.
+Перед production-релизом:
 
-Обязательны `index.html`, маршруты products/faq/about/contacts, `404.html`, robots, sitemap, `web.config`, Mail.ru/Yandex verification и BIMI.
+- рабочее дерево должно быть чистым;
+- локальная ветка должна быть `main`;
+- локальный `HEAD` должен совпадать с `origin/main`;
+- `scripts/release-prod.ps1` делает `git fetch`, но не делает `git pull`;
+- если в GitHub появился более новый commit, релиз обязан остановиться;
+- пользователь должен вручную сделать Pull, снова проверить staging и только потом выпускать релиз.
 
-## 5. Backend и секреты
+Нельзя автоматически подтягивать новый commit непосредственно перед production-релизом.
 
-Backend слушает только `127.0.0.1:3001`; IIS site-level проксирует только `/api/*`. Express доверяет forwarded IP только loopback IIS. Обязательны `/api/health`, server validation, honeypot, rate limit, JSON limit и безопасные 400/429/500.
+## 4. `dist/` — готовый production-артефакт
 
-SMTP-переменные: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `CONTACT_TO`. Пароль хранится только вне Git в production/staging environment. Никогда не читать/печатать/коммитить приватные ключи, пароли или токены.
+`dist/` хранится в Git и является готовой публикацией сайта.
 
-Production имеет постоянный Node.js runtime только для backend. Production не использует npm registry, не выполняет `npm install`/`npm ci`, не содержит Git/исходную рабочую копию и ничего не собирает. Backend ZIP приезжает с production `node_modules`.
+После любых изменений, влияющих на сайт:
 
-## 6. Staging
+1. изменить исходные файлы;
+2. выполнить `npm run build`;
+3. убедиться, что обновлённый `dist/` соответствует исходникам;
+4. включить исходники и соответствующий `dist/` в один commit.
 
-Рабочая копия: `C:\Users\Administrator\Desktop\Our_Projects\site_bak`. IIS site: `BTS-STAGE`; URL: `https://stage.btsys.ru`; frontend path: `<repo>\dist`. Backend запускается отдельно с environment вне Git, а постоянное IIS правило `/api/*` настраивается `scripts/configure-staging-iis.ps1`.
+Не вносить изменения только в `dist/` без соответствующих изменений исходников.
 
-Не затрагивать `POTOK_WebApp` / `potok-crm.ru` на том же сервере.
+До выполнения двухкомпонентной миграции production остаётся static-only. После миграции production использует постоянный Node.js runtime только для backend. Production не использует Git, GitHub Desktop, npm registry, `npm install`/`npm ci` при обычном deploy и не выполняет frontend/backend build: готовый backend приезжает со staging вместе с production-зависимостями.
 
-## 7. Production
+## 5. `dist/` должен быть production-safe
 
-IIS site/app pool: `BTS`; URL: `https://btsys.ru`. Frontend releases: `C:\Sites\BTS\releases\<release_id>`. Backend releases: `C:\Sites\BTS\backend-releases\<release_id>`; active junction: `C:\Sites\BTS\backend-current`; WinSW service: `BTS Contact API` (`BTSContactApi`).
+Один и тот же `dist/` используется на staging и production.
 
-Не удалять `C:\Sites\BTS\releases\20260911-193310_legacy-prod` и `C:\Sites\BTS_Site\bts-fuel-tanks\dist`. Immutable release нельзя менять после публикации.
+Поэтому в `dist/` нельзя добавлять staging-специфичные настройки, включая:
 
-Постоянное IIS `/api/*` правило находится в applicationHost.config, не в frontend `web.config`. Не менять bindings, HTTPS, certificates, HSTS, DNS или весь сайт proxy.
+- `X-Robots-Tag: noindex`;
+- глобальный `noindex` для staging;
+- `stage.btsys.ru`;
+- `localhost`;
+- `127.0.0.1`;
+- локальные Windows-пути;
+- временные staging-заглушки.
 
-## 8. Release и worker
+Изоляция `stage.btsys.ru` от поисковиков задаётся только в IIS на staging-сервере.
 
-Канонический клиент: `scripts/release-prod.ps1`. Он сравнивает component trees, запускает preflight, готовит только изменившиеся ZIP, считает SHA-256, загружает все ZIP первыми и request JSON последним.
+Страница `404.html` может и должна иметь собственный `noindex`.
 
-Канонический versioned worker: `scripts/production/worker-v2.ps1`; установленный путь: `C:\ProgramData\BTS\deploy\worker.ps1`; запуск как SYSTEM через существующую Scheduled Task. `bts-deploy` остаётся непривилегированным и имеет только транспортные права incoming/outbox.
+## 6. IIS и `web.config`
 
-Worker разворачивает backend первым, проверяет `/api/health`, затем переключает frontend и выполняет прежние sitemap/404 health checks. State обновляется только после успеха. Ошибка откатывает все компоненты, изменённые release; неизменившийся компонент не затрагивается. External failure вызывает rollback request.
+`dist/web.config` — production-safe конфигурация IIS.
 
-State сохраняет отдельные frontend/backend tree, commit и backend release; старые `current-release.txt`/`current-commit.txt` сохраняют frontend-совместимость.
+Без отдельной причины не удалять и не ломать:
 
-## 9. Migration и rollback
+- MIME-тип `.webp`;
+- защитные HTTP-заголовки;
+- Content-Security-Policy;
+- обработку фирменной `404.html`.
 
-Однократную миграцию выполняет только Administrator вручную: `scripts/production/migrate-two-component.ps1`. Она делает IIS/worker/state backup, проверяет Node, URL Rewrite, ARR, WinSW и SMTP_PASS, не переключает активный frontend, создаёт backend storage/service/proxy и устанавливает worker.
+Staging-специфичные IIS-настройки не переносить в `web.config`.
 
-Откат миграции: `scripts/production/rollback-migration.ps1`. Не выполнять миграцию, live release или production rollback автоматически из задач разработки.
+Production-релиз не должен пересоздавать сайт IIS, application pool, bindings, сертификаты, HSTS или DNS. При релизе меняется только physical path корневого virtual directory сайта `BTS`.
 
-## 10. SSH и VPN
+## 7. Служебные production-файлы
 
-Deployment key: `C:\ProgramData\BTS\ssh\bts_prod_ed25519`, строго вне Git. Production SSH пользователь `bts-deploy`, source Germany `142.132.205.110`, production IP `135.106.194.75`. Перед live release AmneziaVPN на Selectel должен быть выключен; release script не управляет VPN.
+Сборка обязана сохранять в `dist/` как минимум:
 
-## 11. Временные файлы и проверки
+- `index.html`;
+- страницы `products/`, `faq/`, `about/`, `contacts/`;
+- `404.html`;
+- `robots.txt`;
+- `sitemap.xml`;
+- `web.config`;
+- файлы подтверждения Mail.ru и Яндекса;
+- BIMI-ресурс в `dist/assets/bimi/`.
 
-`.release/` игнорируется Git. `*.before-*` не коммитить. Перед завершением проверить build, backend lock/install/tests (если сеть доступна), frontend routes/form, dist separation, PowerShell syntax, secrets, `git status --short`, `git diff --stat` и собственный diff.
+Preflight уже контролирует эти требования. Не ослаблять проверки без явной причины.
+
+## 8. Staging-сервер
+
+Staging работает на немецком Windows-сервере.
+
+Рабочий проект:
+
+`C:\Users\Administrator\Desktop\Our_Projects\site_bak`
+
+Staging IIS-сайт:
+
+`BTS-STAGE`
+
+Публичный адрес:
+
+`https://stage.btsys.ru`
+
+IIS staging указывает непосредственно на:
+
+`C:\Users\Administrator\Desktop\Our_Projects\site_bak\dist`
+
+На этом же сервере работает чужой для данного проекта сайт/приложение `POTOK_WebApp` / `potok-crm.ru`.
+
+Его нельзя останавливать, перенастраивать, использовать для БТС или затрагивать при обслуживании БТС.
+
+## 9. Production-сервер
+
+Production — отдельный Windows Server 2019 в Selectel.
+
+IIS-сайт: `BTS`.
+
+Application pool: `BTS`.
+
+Публичный сайт: `https://btsys.ru`.
+
+Production использует immutable release-папки:
+
+`C:\Sites\BTS\releases\<release_id>\`
+
+Нельзя заменять содержимое активной release-папки после публикации. Новый релиз всегда создаётся в новой папке.
+
+Нельзя удалять аварийный baseline:
+
+`C:\Sites\BTS\releases\20260911-193310_legacy-prod`
+
+Также без отдельного решения не удалять исходный старый production:
+
+`C:\Sites\BTS_Site\bts-fuel-tanks\dist`
+
+## 10. Production-релиз
+
+Канонический клиент релиза:
+
+`scripts/release-prod.ps1`
+
+Обычный production-релиз запускается с немецкого staging-сервера.
+
+`-dryrun` обязан выполнять проверки и упаковку без отправки данных на production.
+
+Живой релиз обязан использовать существующий механизм:
+
+- preflight;
+- Playwright;
+- проверку GitHub;
+- упаковку текущего `dist/`;
+- SHA-256;
+- SSH/SCP;
+- production worker;
+- server-side health checks;
+- external health checks;
+- автоматический rollback при ошибке.
+
+Не заменять эту цепочку прямым копированием файлов в активную папку IIS.
+
+## 11. Production worker
+
+Привилегированное переключение IIS выполняет не SSH-пользователь, а локальный worker на production.
+
+Worker:
+
+`C:\ProgramData\BTS\deploy\worker.ps1`
+
+Он запускается как `SYSTEM` через Task Scheduler.
+
+SSH-пользователь `bts-deploy` не является администратором. Не выдавать ему административные права, если это специально не согласовано.
+
+## 12. SSH и секреты
+
+Приватный deployment-ключ намеренно хранится вне Git-репозитория:
+
+`C:\ProgramData\BTS\ssh\bts_prod_ed25519`
+
+Это допустимое исключение из правила «всё внутри папки проекта», потому что приватный ключ нельзя хранить в Git.
+
+Никогда не коммитить приватный ключ, не печатать его содержимое в лог, не переносить его в репозиторий и не отправлять его в чат.
+
+Public key, IP-адреса, имена пользователей и пути к ключам секретами не являются.
+
+## 13. VPN на Selectel
+
+На production-сервере используется AmneziaVPN/AmneziaWG.
+
+При включённом VPN обратный маршрут к немецкому серверу `142.132.205.110` уходит в туннель, из-за чего входящий SSH Germany → Selectel не работает.
+
+Поэтому перед живым production-релизом:
+
+**AmneziaVPN на Selectel должен быть выключен.**
+
+После успешного релиза VPN можно снова включить.
+
+Не пытаться автоматически менять VPN из release-скрипта без отдельного решения пользователя.
+
+## 14. Rollback
+
+Rollback — обязательная часть схемы.
+
+Если внутренняя production-проверка после переключения IIS не проходит, production worker должен автоматически вернуть предыдущий physical path.
+
+Если внутренняя проверка прошла, но внешняя проверка с немецкого сервера не прошла, release-клиент должен отправить rollback-заявку production worker.
+
+Не убирать rollback ради упрощения процесса.
+
+## 15. Локальные временные файлы
+
+`.release/` содержит локальные ZIP/JSON артефакты релизов и игнорируется Git.
+
+Локальный ярлык запуска релиза может находиться в `.local/`; `.local/` может быть исключена через `.git/info/exclude` и не обязана храниться в Git.
+
+Резервные копии скриптов вида `*.before-*` не должны попадать в репозиторий.
+
+## 16. Обновление документации
+
+Если намеренно изменены сервер, IP, домен, путь, IIS-site/app pool, SSH-схема, release flow, worker, rollback, VPN-зависимость, staging-изоляция или preflight, в том же наборе изменений обновить `INFRASTRUCTURE.md`, а при необходимости и `AGENTS.md`.
+
+## 17. Приоритет правил и фактического состояния
+
+`AGENTS.md` задаёт обязательные правила работы, а `INFRASTRUCTURE.md` описывает фактически настроенную инфраструктуру.
+
+Если эти файлы противоречат друг другу или фактическому состоянию серверов:
+
+1. не выполнять потенциально разрушительные изменения;
+2. проверить реальное состояние Git, IIS, серверных путей и release-механизма;
+3. определить, какой документ устарел;
+4. исправить документацию вместе с осознанным изменением инфраструктуры.
+
+Нельзя «исправлять» production только ради приведения его к тексту документации без проверки фактического рабочего состояния.
+
+## 18. Два независимых компонента после миграции
+
+Frontend — готовый статический артефакт `dist/`; backend — самостоятельный артефакт `backend/`. Корневой `npm run build` собирает только frontend. Backend-зависимости принадлежат только `backend/package.json`; backend, `node_modules`, SMTP-конфигурация, WinSW и backend release-файлы запрещены в `dist/`.
+
+Версии компонентов определяются отдельно через Git tree hash `HEAD:dist` и `HEAD:backend`. Компонент со статусом `UNCHANGED` нельзя паковать, загружать, переключать, перезапускать или записывать в production state.
+
+После миграции backend хранится в immutable `C:\Sites\BTS\backend-releases\<release_id>`, активируется junction `C:\Sites\BTS\backend-current`, работает как WinSW-служба `BTSContactApi` и слушает только `127.0.0.1:3001`. Постоянный IIS `/api/*` proxy находится вне `dist`. Backend-секреты хранятся только во внешнем environment.
+
+Backend rollback обязателен; при релизе двух компонентов ошибка должна восстановить оба изменённых компонента. Однократную миграцию и её rollback нельзя запускать автоматически из обычной задачи разработки.

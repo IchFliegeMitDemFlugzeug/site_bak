@@ -25,15 +25,31 @@ if (-not (Test-Path $appCmd)) { throw 'IIS is not installed' }
 if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) { throw 'Node.js runtime is required' }
 if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\IIS Extensions\URL Rewrite')) { throw 'IIS URL Rewrite is required' }
 try { Get-WebConfiguration -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.webServer/proxy' -ErrorAction Stop | Out-Null } catch { throw 'IIS Application Request Routing is required' }
-foreach ($path in @($InitialBackendZip,$WinSWExe,$WorkerSource)) { if (-not (Test-Path $path)) { throw "Required file missing: $path" } }
-if (-not [Environment]::GetEnvironmentVariable('SMTP_PASS','Machine')) { throw 'Machine environment variable SMTP_PASS is required' }
+foreach ($path in @($InitialBackendZip,$WinSWExe,$WorkerSource,(Join-Path $repoRoot 'backend\config\BTS.ContactApi.xml'))) { if (-not (Test-Path $path)) { throw "Required file missing: $path" } }
+if (-not (Test-Path 'IIS:\Sites\BTS')) { throw 'IIS site BTS is missing' }
+$requiredEnvironment = @('SMTP_HOST','SMTP_PORT','SMTP_USER','SMTP_PASS','CONTACT_TO')
+foreach ($name in $requiredEnvironment) {
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name,'Machine'))) { throw "Required machine environment variable is missing: $name" }
+}
+$smtpPort = 0
+if (-not [int]::TryParse([Environment]::GetEnvironmentVariable('SMTP_PORT','Machine'),[ref]$smtpPort) -or $smtpPort -lt 1 -or $smtpPort -gt 65535) { throw 'SMTP_PORT must be a number from 1 to 65535' }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$backendZip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $InitialBackendZip))
+try {
+    $backendEntries = @($backendZip.Entries | ForEach-Object FullName)
+    if ($backendEntries -notcontains 'server.js' -or -not ($backendEntries | Where-Object { $_ -like 'node_modules/*' })) { throw 'Initial backend ZIP is incomplete' }
+}
+finally { $backendZip.Dispose() }
 
 New-Item -ItemType Directory -Force -Path $backupRoot,$backendReleases,$serviceRoot,(Join-Path $serviceRoot 'logs'),$state,(Join-Path $deployRoot 'incoming'),(Join-Path $deployRoot 'outbox') | Out-Null
 & $appCmd add backup "BTS-before-two-component-$stamp" | Out-Null
 if (Test-Path $workerTarget) { Copy-Item $workerTarget (Join-Path $backupRoot 'worker.ps1') }
 if (Test-Path $state) { Copy-Item $state (Join-Path $backupRoot 'state') -Recurse }
+if (Test-Path $serviceExe) { Copy-Item $serviceExe (Join-Path $backupRoot 'BTSContactApi.exe') }
+if (Test-Path $serviceXml) { Copy-Item $serviceXml (Join-Path $backupRoot 'BTSContactApi.xml') }
 & $appCmd list config 'BTS' /section:system.webServer/rewrite /xml | Set-Content (Join-Path $backupRoot 'iis-bts-rewrite.xml') -Encoding UTF8
-[IO.File]::WriteAllText((Join-Path $backupRoot 'migration.json'), (@{ stamp=$stamp; backend_current=if(Test-Path $backendCurrent){(Get-Item $backendCurrent).Target}else{''} } | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+$oldService = Get-Service BTSContactApi -ErrorAction SilentlyContinue
+[IO.File]::WriteAllText((Join-Path $backupRoot 'migration.json'), (@{ stamp=$stamp; backend_current=if(Test-Path $backendCurrent){(Get-Item $backendCurrent).Target}else{''}; service_existed=[bool]$oldService; service_status=if($oldService){[string]$oldService.Status}else{''} } | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
 
 $initialRelease = Join-Path $backendReleases "${stamp}_migration"
 if (-not (Test-Path $initialRelease)) { Expand-Archive $InitialBackendZip $initialRelease }
@@ -48,7 +64,6 @@ if (-not (Get-Service BTSContactApi -ErrorAction SilentlyContinue)) { & $service
 
 Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.webServer/proxy' -Name enabled -Value true
 $site = 'BTS'
-if (-not (Test-Path "IIS:\Sites\$site")) { throw 'IIS site BTS is missing' }
     $filter = 'system.webServer/rewrite/rules'
     $existing = Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Location $site -Filter "$filter/rule[@name='BTS API reverse proxy']" -Name '.' -ErrorAction SilentlyContinue
     if (-not $existing) {

@@ -141,6 +141,8 @@ if ($NpmCommand -and $BackendChanged) {
     if ($LASTEXITCODE -eq 0) { Add-Pass 'backend JavaScript syntax is valid' } else { Add-Fail 'backend JavaScript syntax is invalid' }
     & $NpmCommand.Source test --prefix $Backend
     if ($LASTEXITCODE -eq 0) { Add-Pass 'backend tests passed' } else { Add-Fail "backend tests failed: $LASTEXITCODE" }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'scripts\test-backend-packaging.ps1')
+    if ($LASTEXITCODE -eq 0) { Add-Pass 'backend recursive packaging test passed' } else { Add-Fail "backend packaging test failed: $LASTEXITCODE" }
 }
 
 # These files are mandatory for every production release.
