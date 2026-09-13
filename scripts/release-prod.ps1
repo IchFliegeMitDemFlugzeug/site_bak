@@ -164,7 +164,12 @@ Write-Host "FRONTEND action: $(if ($frontendChanged) { 'DEPLOY' } else { 'SKIP' 
 Write-Host "BACKEND action: $(if ($backendChanged) { 'DEPLOY' } else { 'SKIP' })"
 
 Write-Host '=== existing project preflight ==='
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Preflight -BackendChanged:$backendChanged
+if ($backendChanged) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Preflight -BackendChanged
+}
+else {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Preflight
+}
 if ($LASTEXITCODE -ne 0) { throw 'project preflight failed' }
 $postPreflightChanges = @(& $Git status --porcelain)
 if ($head -ne (& $Git rev-parse HEAD).Trim() -or $postPreflightChanges.Count -ne 0) { throw 'repository changed during preflight' }

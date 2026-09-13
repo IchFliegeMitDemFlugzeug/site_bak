@@ -113,13 +113,70 @@ Assert-Check (Test-Path $Backend) 'backend directory exists'
 foreach ($BackendFile in @('server.js','package.json','package-lock.json')) {
     Assert-Check (Test-Path (Join-Path $Backend $BackendFile)) "Backend file exists: $BackendFile"
 }
-$BackendPackage = if (Test-Path (Join-Path $Backend 'package.json')) { Get-Content (Join-Path $Backend 'package.json') -Raw | ConvertFrom-Json } else { $null }
-$BackendLock = if (Test-Path (Join-Path $Backend 'package-lock.json')) { Get-Content (Join-Path $Backend 'package-lock.json') -Raw | ConvertFrom-Json } else { $null }
+Add-Type -AssemblyName System.Web.Extensions
+$JsonSerializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+$JsonSerializer.MaxJsonLength = [int]::MaxValue
+
+$BackendPackage = if (Test-Path (Join-Path $Backend 'package.json')) {
+    $JsonSerializer.DeserializeObject((Get-Content (Join-Path $Backend 'package.json') -Raw))
+}
+else {
+    $null
+}
+
+$BackendLock = if (Test-Path (Join-Path $Backend 'package-lock.json')) {
+    $JsonSerializer.DeserializeObject((Get-Content (Join-Path $Backend 'package-lock.json') -Raw))
+}
+else {
+    $null
+}
+
 if ($BackendPackage -and $BackendLock) {
-    $PackageDependencies = @($BackendPackage.dependencies.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object)
-    $LockRoot = $BackendLock.packages.PSObject.Properties[''].Value
-    $LockDependencies = @($LockRoot.dependencies.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object)
-    Assert-Check (($PackageDependencies -join '|') -eq ($LockDependencies -join '|')) 'backend package.json and lockfile root dependencies agree'
+    $PackageDependencyTable = $BackendPackage['dependencies']
+    $LockPackages = $BackendLock['packages']
+    $LockRoot = if ($LockPackages -and $LockPackages.ContainsKey('')) {
+        $LockPackages['']
+    }
+    else {
+        $null
+    }
+    $LockDependencyTable = if ($LockRoot) {
+        $LockRoot['dependencies']
+    }
+    else {
+        $null
+    }
+
+    $PackageDependencies = if ($PackageDependencyTable) {
+        @(
+            $PackageDependencyTable.GetEnumerator() |
+            ForEach-Object { "$($_.Key)=$($_.Value)" } |
+            Sort-Object
+        )
+    }
+    else {
+        @()
+    }
+
+    $LockDependencies = if ($LockDependencyTable) {
+        @(
+            $LockDependencyTable.GetEnumerator() |
+            ForEach-Object { "$($_.Key)=$($_.Value)" } |
+            Sort-Object
+        )
+    }
+    else {
+        @()
+    }
+
+    $DependencyMetadataOk =
+        ($null -ne $PackageDependencyTable) -and
+        ($null -ne $LockDependencyTable)
+
+    Assert-Check (
+        $DependencyMetadataOk -and
+        (($PackageDependencies -join '|') -eq ($LockDependencies -join '|'))
+    ) 'backend package.json and lockfile root dependencies agree'
 }
 Assert-Check (-not (Test-Path (Join-Path $Dist 'backend'))) 'backend is absent from dist'
 Assert-Check (-not (Test-Path (Join-Path $Dist 'node_modules'))) 'node_modules is absent from dist'
