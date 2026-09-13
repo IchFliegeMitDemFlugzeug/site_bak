@@ -159,7 +159,7 @@ Production использует immutable release-папки:
 
 Обычный production-релиз запускается с немецкого staging-сервера.
 
-`-dryrun` обязан выполнять проверки и только read-only SSH-опрос production: он ничего не загружает, не упаковывает для отправки, не пишет и не переключает на production.
+`-dryrun` обязан выполнять проверки через `mode=check` request к SYSTEM worker. Кроме служебных request/result-файлов он ничего не загружает, не упаковывает для отправки и не изменяет application infrastructure, component state или сайт.
 
 Живой релиз обязан использовать существующий механизм:
 
@@ -185,6 +185,8 @@ Worker:
 `C:\ProgramData\BTS\deploy\worker.ps1`
 
 Он запускается как `SYSTEM` через Task Scheduler.
+
+Worker является единственным production-исполнителем `ensure-production.ps1`: SSH-пользователь только передаёт reconcile request/assets через `incoming` и читает результат из `outbox`. Единственный ручной bootstrap допускается только для первоначальной замены legacy worker на worker v2 и установки канонического ensure; он не является миграцией сайта/backend.
 
 SSH-пользователь `bts-deploy` не является администратором. Не выдавать ему административные права, если это специально не согласовано.
 
@@ -255,6 +257,6 @@ Frontend — готовый статический артефакт `dist/`; bac
 
 Версии компонентов определяются отдельно через Git tree hash `HEAD:dist` и `HEAD:backend`. Компонент со статусом `UNCHANGED` нельзя паковать, загружать, переключать, перезапускать или записывать в production state.
 
-Backend хранится в immutable `C:\Sites\BTS\backend-releases\<release_id>`, активируется junction `C:\Sites\BTS\backend-current`, работает как WinSW-служба `BTSContactApi` и слушает только `127.0.0.1:3001`. IIS `/api/*` proxy находится вне `dist` и включается только после строгого local backend health. Backend-секреты хранятся только во внешнем environment.
+Backend хранится в immutable `C:\Sites\BTS\backend-releases\<release_id>`, активируется junction `C:\Sites\BTS\backend-current`, работает как WinSW-служба `BTSContactApi` под `NT AUTHORITY\LocalService` и слушает только `127.0.0.1:3001`. IIS `/api/*` proxy находится вне `dist` и включается только после строгого local backend health. Backend-секреты хранятся только во внешнем environment.
 
 Backend rollback обязателен; при релизе двух компонентов ошибка должна восстановить оба изменённых компонента. `scripts/production/ensure-production.ps1` — единственный постоянный способ проверки и восстановления application infrastructure; component rollback не откатывает выполненный им ремонт инфраструктуры.

@@ -9,14 +9,63 @@ $BackendReleases = 'C:\Sites\BTS\backend-releases'
 $BackendCurrent = 'C:\Sites\BTS\backend-current'
 $ServiceName = 'BTSContactApi'
 $AppCmd = "$env:windir\system32\inetsrv\appcmd.exe"
+$EnsureTarget = Join-Path $DeployRoot 'ensure-production.ps1'
 
-function Write-Result([string]$ReleaseId, [string]$Status, [string]$Message, $Snapshot = $null) {
+function Write-Result([string]$ReleaseId, [string]$Status, [string]$Message, $Snapshot = $null, $Details = $null) {
     $result = [ordered]@{ release_id = $ReleaseId; status = $Status; message = $Message }
     if ($Snapshot) { $result.snapshot = $Snapshot }
+    if ($Details) { $result.details = $Details }
     $temporary = Join-Path $Outbox "$ReleaseId.json.tmp"
     $target = Join-Path $Outbox "$ReleaseId.json"
     [IO.File]::WriteAllText($temporary, ($result | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
     Move-Item -LiteralPath $temporary -Destination $target -Force
+}
+
+function Test-Asset($Asset, [string]$RequestId, [string]$ExpectedSuffix) {
+    if ([string]$Asset.file -cne "$RequestId.$ExpectedSuffix") { throw "invalid reconcile asset: $ExpectedSuffix" }
+    if ([string]$Asset.sha256 -notmatch '^[0-9a-f]{64}$') { throw "invalid reconcile hash: $ExpectedSuffix" }
+    $path = Join-Path $Incoming ([string]$Asset.file)
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing reconcile asset: $ExpectedSuffix" }
+    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne [string]$Asset.sha256) { throw "reconcile asset hash mismatch: $ExpectedSuffix" }
+    return $path
+}
+
+function Process-Reconcile($Request, [string]$RequestPath) {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    if ($identity.User.Value -ne 'S-1-5-18') { throw 'reconcile requests may run only in the SYSTEM worker' }
+    $requestId = [string]$Request.release_id
+    if ($requestId -notmatch '^reconcile_[0-9]{8}-[0-9]{6}_[0-9a-f]{12}$') { throw 'invalid reconcile request id' }
+    if ([string]$Request.mode -notin @('check','apply')) { throw 'invalid reconcile mode' }
+    if ([string]$Request.expected_worker_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'invalid expected worker hash' }
+    if ([string]$Request.expected_ensure_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'invalid expected ensure hash' }
+    $assetPaths = @()
+    try {
+        if ([string]$Request.mode -eq 'apply') {
+            $ensureSource = Test-Asset $Request.assets.ensure $requestId 'ensure-production.ps1'
+            $workerSource = Test-Asset $Request.assets.worker $requestId 'worker-v2.ps1'
+            $configSource = Test-Asset $Request.assets.service_config $requestId 'BTS.ContactApi.xml'
+            $winSWSource = Test-Asset $Request.assets.winsw $requestId 'WinSW-x64.exe'
+            $assetPaths = @($ensureSource,$workerSource,$configSource,$winSWSource)
+            Copy-Item -LiteralPath $ensureSource -Destination $EnsureTarget -Force
+            $output = & $EnsureTarget -WorkerSource $workerSource -ServiceConfigSource $configSource -WinSWSource $winSWSource -ExpectedWorkerHash $Request.expected_worker_sha256 -ExpectedEnsureHash $Request.expected_ensure_sha256
+            $details = ($output | Select-Object -Last 1) | ConvertFrom-Json
+            Write-Result $requestId 'reconciled' 'production infrastructure reconciled by SYSTEM worker' $null $details
+        }
+        else {
+            if (-not (Test-Path -LiteralPath $EnsureTarget -PathType Leaf)) { throw 'worker bootstrap is required: canonical ensure-production.ps1 is missing' }
+            $output = & $EnsureTarget -CheckOnly -WorkerSource $PSCommandPath -ExpectedWorkerHash $Request.expected_worker_sha256 -ExpectedEnsureHash $Request.expected_ensure_sha256
+            $details = ($output | Select-Object -Last 1) | ConvertFrom-Json
+            Write-Result $requestId 'checked' 'production infrastructure checked without changes' $null $details
+        }
+    }
+    catch {
+        Write-Result $requestId 'reconcile_failed' $_.Exception.Message
+    }
+    finally {
+        foreach ($assetPath in $assetPaths) { Remove-Item -LiteralPath $assetPath -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $RequestPath -Destination (Join-Path $Processed ([IO.Path]::GetFileName($RequestPath))) -Force
+    }
 }
 
 function Get-TextState([string]$Name) {
@@ -180,6 +229,10 @@ function Process-Rollback($Rollback, [string]$RollbackPath) {
 }
 
 New-Item -ItemType Directory -Force -Path $Incoming,$Outbox,$State,$Processed,$FrontendReleases,$BackendReleases | Out-Null
+foreach ($reconcilePath in @(Get-ChildItem $Incoming -Filter '*.reconcile.json' -File)) {
+    try { Process-Reconcile (Get-Content $reconcilePath.FullName -Raw | ConvertFrom-Json) $reconcilePath.FullName }
+    catch { Write-Result $reconcilePath.BaseName.Replace('.reconcile','') 'reconcile_failed' $_.Exception.Message }
+}
 foreach ($rollbackPath in @(Get-ChildItem $Incoming -Filter '*.rollback.json' -File)) {
     try { Process-Rollback (Get-Content $rollbackPath.FullName -Raw | ConvertFrom-Json) $rollbackPath.FullName }
     catch { Write-Result $rollbackPath.BaseName.Replace('.rollback','') 'rollback_request_failed' $_.Exception.Message }

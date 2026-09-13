@@ -1,189 +1,299 @@
 param([switch]$dryrun)
+
 $ErrorActionPreference = 'Stop'
-$repo = Split-Path -Parent $PSScriptRoot
-$dist = Join-Path $repo 'dist'
-$backend = Join-Path $repo 'backend'
-$preflight = Join-Path $repo 'scripts\preflight.ps1'
-$backendPackaging = Join-Path $repo 'scripts\backend-package.ps1'
-$ensureSource = Join-Path $repo 'scripts\production\ensure-production.ps1'
-$workerSource = Join-Path $repo 'scripts\production\worker-v2.ps1'
-$serviceConfigSource = Join-Path $repo 'backend\config\BTS.ContactApi.xml'
-$outRoot = Join-Path $repo '.release'
-$toolCache = Join-Path $outRoot 'tools\winsw-2.12.0'
-$winSWCache = Join-Path $toolCache 'WinSW-x64.exe'
-$winSWUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
-$sshKey = 'C:\ProgramData\BTS\ssh\bts_prod_ed25519'
-$remote = 'bts-deploy@135.106.194.75'
+$Repo = Split-Path -Parent $PSScriptRoot
+$Dist = Join-Path $Repo 'dist'
+$Backend = Join-Path $Repo 'backend'
+$Preflight = Join-Path $Repo 'scripts\preflight.ps1'
+$BackendPackaging = Join-Path $Repo 'scripts\backend-package.ps1'
+$EnsureSource = Join-Path $Repo 'scripts\production\ensure-production.ps1'
+$WorkerSource = Join-Path $Repo 'scripts\production\worker-v2.ps1'
+$ServiceConfigSource = Join-Path $Repo 'backend\config\BTS.ContactApi.xml'
+$OutRoot = Join-Path $Repo '.release'
+$WinSWVersion = '2.12.0'
+$WinSWCache = Join-Path $OutRoot "tools\winsw-$WinSWVersion\WinSW-x64.exe"
+$WinSWUrl = "https://github.com/winsw/winsw/releases/download/v$WinSWVersion/WinSW-x64.exe"
+$SshKey = 'C:\ProgramData\BTS\ssh\bts_prod_ed25519'
+$Remote = 'bts-deploy@135.106.194.75'
 $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-Set-Location $repo
+Set-Location $Repo
 
 function Get-Git {
-    return Get-ChildItem "$env:LOCALAPPDATA\GitHubDesktop" -Filter git.exe -Recurse -ErrorAction SilentlyContinue |
-        Where-Object FullName -Like '*\git\cmd\git.exe' | Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1 -ExpandProperty FullName
+    return (Get-ChildItem "$env:LOCALAPPDATA\GitHubDesktop" -Filter git.exe -Recurse -ErrorAction SilentlyContinue |
+        Where-Object FullName -Like '*\git\cmd\git.exe' |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1 -ExpandProperty FullName)
 }
-function Invoke-Ssh([string]$Command) {
-    $output = @(& ssh.exe -i $sshKey -o batchmode=yes -o connecttimeout=10 $remote $Command)
+
+function Invoke-Ssh {
+    param([Parameter(Mandatory = $true)][string]$Command)
+    $output = @(& ssh.exe -i $SshKey -o batchmode=yes -o connecttimeout=10 $Remote $Command)
     if ($LASTEXITCODE -ne 0) { throw "production SSH command failed: $LASTEXITCODE" }
     return $output
 }
-function Copy-ToProduction([string]$LocalPath,[string]$RemotePath) {
-    & scp.exe -i $sshKey -o batchmode=yes -o connecttimeout=10 $LocalPath "${remote}:$RemotePath"
+
+function Copy-ToProduction {
+    param(
+        [Parameter(Mandatory = $true)][string]$LocalPath,
+        [Parameter(Mandatory = $true)][string]$RemotePath
+    )
+    & scp.exe -i $SshKey -o batchmode=yes -o connecttimeout=10 $LocalPath "${Remote}:$RemotePath"
     if ($LASTEXITCODE -ne 0) { throw "production upload failed for $LocalPath`: $LASTEXITCODE" }
 }
-function Get-RemoteResult([string]$ReleaseId,[string[]]$TerminalStatuses,[int]$TimeoutSeconds=240) {
+
+function Get-RemoteResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$RequestId,
+        [Parameter(Mandatory = $true)][string[]]$TerminalStatuses,
+        [int]$TimeoutSeconds = 240
+    )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $raw = Invoke-Ssh "powershell.exe -noprofile -command `"if(test-path 'C:\ProgramData\BTS\deploy\outbox\$ReleaseId.json'){get-content 'C:\ProgramData\BTS\deploy\outbox\$ReleaseId.json' -raw}`""
+        $command = "powershell.exe -NoProfile -Command `"if(Test-Path 'C:\ProgramData\BTS\deploy\outbox\$RequestId.json'){Get-Content 'C:\ProgramData\BTS\deploy\outbox\$RequestId.json' -Raw}`""
+        $raw = Invoke-Ssh -Command $command
         if ($raw) {
-            try { $result = ($raw -join "`n") | ConvertFrom-Json; if ($TerminalStatuses -contains [string]$result.status) { return $result } } catch { }
+            try {
+                $result = ($raw -join "`n") | ConvertFrom-Json
+                if ($TerminalStatuses -contains [string]$result.status) { return $result }
+            }
+            catch { }
         }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)
-    throw "timed out waiting for production worker result for $ReleaseId"
+    throw "Timed out waiting for SYSTEM worker result '$RequestId'. If production still has the legacy worker, run bootstrap-worker-v2.ps1 once as production Administrator."
 }
-function Get-ProductionState {
-    $command = @'
-$state='C:\ProgramData\BTS\deploy\state'
-$worker='C:\ProgramData\BTS\deploy\worker.ps1'
-$task=Get-ScheduledTask -TaskPath '\bts\' -TaskName 'bts deploy worker' -ErrorAction SilentlyContinue
-$service=Get-Service BTSContactApi -ErrorAction SilentlyContinue
-$server='C:\Sites\BTS\backend-current\server.js'
-$health=$false
-if(Test-Path $server){try{$r=Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3001/api/health -TimeoutSec 5;$health=$r.StatusCode -eq 200 -and $r.Content.Trim() -ceq'{"ok":true}'}catch{}}
-$rule=$false
-try{$x=Get-WebConfigurationProperty -PSPath MACHINE/WEBROOT/APPHOST -Location BTS -Filter "system.webServer/rewrite/rules/rule[@name='BTS API reverse proxy']/action" -Name url -ErrorAction Stop;$rule=[string]$x.Value -ceq 'http://127.0.0.1:3001/api/{R:1}'}catch{}
-$smtp=@('SMTP_HOST','SMTP_PORT','SMTP_USER','SMTP_PASS','CONTACT_TO')|?{[string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_,'Machine'))}
-$o=[ordered]@{
- node=Test-Path 'C:\Program Files\nodejs\node.exe';iis=Test-Path "$env:windir\system32\inetsrv\appcmd.exe"
- rewrite=[bool](Get-WebGlobalModule RewriteModule -ErrorAction SilentlyContinue);arr=$null -ne (Get-WebConfiguration -PSPath MACHINE/WEBROOT/APPHOST -Filter system.webServer/proxy -ErrorAction SilentlyContinue)
- arr_enabled=[bool](Get-WebConfigurationProperty -PSPath MACHINE/WEBROOT/APPHOST -Filter system.webServer/proxy -Name enabled -ErrorAction SilentlyContinue).Value
- worker_hash=if(Test-Path $worker){(Get-FileHash $worker -Algorithm SHA256).Hash.ToLower()}else{''}
- task_ok=[bool]($task -and $task.Actions.Count -eq 1 -and $task.Actions[0].Arguments -like'*C:\ProgramData\BTS\deploy\worker.ps1*')
- service_installed=[bool]$service;service_ready=[bool]($service -and $service.StartType -eq 'Automatic' -and $service.Status -eq 'Running' -and $health)
- backend_health=$health;api_proxy=[bool]($health -and $rule);smtp_ok=$smtp.Count -eq 0
- frontend_tree=if(Test-Path "$state\current-frontend-tree.txt"){(gc "$state\current-frontend-tree.txt" -Raw).Trim()}else{''}
- frontend_commit=if(Test-Path "$state\current-commit.txt"){(gc "$state\current-commit.txt" -Raw).Trim()}else{''}
- backend_tree=if(Test-Path "$state\current-backend-tree.txt"){(gc "$state\current-backend-tree.txt" -Raw).Trim()}else{''}
- schema=if(Test-Path "$state\deployment-schema-version.txt"){(gc "$state\deployment-schema-version.txt" -Raw).Trim()}else{''}
- dirs_ok=@('C:\Sites\BTS\backend-releases','C:\ProgramData\BTS\contact-api','C:\ProgramData\BTS\contact-api\logs',"$state\processed")|?{-not(Test-Path $_)}|%{$_}|Measure-Object|% Count
-};[pscustomobject]$o|ConvertTo-Json -Compress
-'@
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    return ((Invoke-Ssh "powershell.exe -NoProfile -EncodedCommand $encoded") -join "`n") | ConvertFrom-Json
+
+function New-ReconcileId {
+    $random = [Guid]::NewGuid().ToString('N').Substring(0,12)
+    return "reconcile_$(Get-Date -Format yyyyMMdd-HHmmss)_$random"
 }
-function Show-Infrastructure($State,[string]$ExpectedWorkerHash) {
-    $workerOk = $State.worker_hash -eq $ExpectedWorkerHash
-    $prerequisites = $State.node -and $State.iis -and $State.rewrite -and $State.arr -and $State.smtp_ok
-    $ready = $prerequisites -and $workerOk -and $State.task_ok -and $State.schema -eq '2' -and $State.dirs_ok -eq 0 -and ((-not $State.backend_health) -or ($State.service_ready -and $State.arr_enabled -and $State.api_proxy))
-    function Mark($ok,$bad) { if ($ok) {'PASS'} else {$bad} }
-    Write-Host 'Production infrastructure:'
-    Write-Host "Node ............... $(Mark $State.node 'MISSING')"
-    Write-Host "URL Rewrite ........ $(Mark $State.rewrite 'MISSING')"
-    Write-Host "ARR ................ $(Mark $State.arr 'MISSING')"
-    Write-Host "Worker ............. $(Mark $workerOk 'UPDATE REQUIRED')"
-    Write-Host "BTSContactApi ....... $(if(-not $State.service_installed){'MISSING'}elseif($State.service_ready){'PASS'}else{'REPAIR REQUIRED'})"
-    Write-Host "API proxy ........... $(if($State.api_proxy){'PASS'}elseif($State.backend_health){'REPAIR REQUIRED'}else{'NOT READY'})"
-    Write-Host "SMTP environment ... $(Mark $State.smtp_ok 'MISSING')"
-    Write-Host "Infrastructure action: $(if($ready){'PASS'}else{'RECONCILE'})"
-    if (-not $prerequisites) { throw 'Base production prerequisite is missing. No deployment is allowed.' }
-    return $ready
-}
-function Invoke-Ensure([string]$RemoteDirectory) {
-    $command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$RemoteDirectory\ensure-production.ps1`" -WorkerSource `"$RemoteDirectory\worker-v2.ps1`" -ServiceConfigSource `"$RemoteDirectory\BTS.ContactApi.xml`" -WinSWSource `"$RemoteDirectory\WinSW-x64.exe`""
-    Invoke-Ssh $command | ForEach-Object { Write-Host $_ }
-}
-function Get-WinSW {
-    New-Item -ItemType Directory -Path $toolCache -Force | Out-Null
-    if (Test-Path $winSWCache) {
-        $signature = Get-AuthenticodeSignature $winSWCache
-        if ($signature.Status -eq 'Valid') { return $winSWCache }
-        Remove-Item $winSWCache -Force
+
+function Get-AssetDescriptor {
+    param(
+        [Parameter(Mandatory = $true)][string]$RequestId,
+        [Parameter(Mandatory = $true)][string]$Suffix,
+        [Parameter(Mandatory = $true)][string]$LocalPath
+    )
+    return [ordered]@{
+        file = "$RequestId.$Suffix"
+        sha256 = (Get-FileHash -LiteralPath $LocalPath -Algorithm SHA256).Hash.ToLowerInvariant()
     }
-    Invoke-WebRequest -UseBasicParsing -Uri $winSWUrl -OutFile $winSWCache
-    $signature = Get-AuthenticodeSignature $winSWCache
-    if ($signature.Status -ne 'Valid') { Remove-Item $winSWCache -Force; throw "Downloaded WinSW signature is not valid: $($signature.Status)" }
-    return $winSWCache
 }
-function Get-HttpResult([string]$Url) {
-    try { $r=Invoke-WebRequest -UseBasicParsing -Uri $Url -MaximumRedirection 5 -TimeoutSec 20; return [pscustomobject]@{status=[int]$r.StatusCode;xrobots=[string]$r.Headers['X-Robots-Tag'];body=[string]$r.Content} }
-    catch { if($_.Exception.Response){return [pscustomobject]@{status=[int]$_.Exception.Response.StatusCode;xrobots='';body=''}};throw }
+
+function Invoke-ReconcileRequest {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('check','apply')][string]$Mode,
+        [string]$WinSWPath
+    )
+    $requestId = New-ReconcileId
+    $localDirectory = Join-Path $OutRoot $requestId
+    $requestPath = Join-Path $localDirectory "$requestId.reconcile.json"
+    New-Item -ItemType Directory -Path $localDirectory -Force | Out-Null
+    $request = [ordered]@{
+        release_id=$requestId
+        mode=$Mode
+        expected_worker_sha256=(Get-FileHash -LiteralPath $WorkerSource -Algorithm SHA256).Hash.ToLowerInvariant()
+        expected_ensure_sha256=(Get-FileHash -LiteralPath $EnsureSource -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    if ($Mode -eq 'apply') {
+        if (-not $WinSWPath) { throw 'WinSW path is required for reconcile apply.' }
+        $request['assets'] = [ordered]@{
+            ensure = (Get-AssetDescriptor -RequestId $requestId -Suffix 'ensure-production.ps1' -LocalPath $EnsureSource)
+            worker = (Get-AssetDescriptor -RequestId $requestId -Suffix 'worker-v2.ps1' -LocalPath $WorkerSource)
+            service_config = (Get-AssetDescriptor -RequestId $requestId -Suffix 'BTS.ContactApi.xml' -LocalPath $ServiceConfigSource)
+            winsw = (Get-AssetDescriptor -RequestId $requestId -Suffix 'WinSW-x64.exe' -LocalPath $WinSWPath)
+        }
+        foreach ($entry in @(
+            @{ descriptor=$request.assets.ensure; source=$EnsureSource },
+            @{ descriptor=$request.assets.worker; source=$WorkerSource },
+            @{ descriptor=$request.assets.service_config; source=$ServiceConfigSource },
+            @{ descriptor=$request.assets.winsw; source=$WinSWPath }
+        )) {
+            Copy-ToProduction -LocalPath $entry.source -RemotePath "C:/ProgramData/BTS/deploy/incoming/$($entry.descriptor.file)"
+        }
+    }
+    [IO.File]::WriteAllText($requestPath, ($request | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    Copy-ToProduction -LocalPath $requestPath -RemotePath "C:/ProgramData/BTS/deploy/incoming/$requestId.reconcile.json"
+    $terminal = if ($Mode -eq 'check') { @('checked','reconcile_failed') } else { @('reconciled','reconcile_failed') }
+    $timeout = if ($Mode -eq 'check') { 75 } else { 240 }
+    $result = Get-RemoteResult -RequestId $requestId -TerminalStatuses $terminal -TimeoutSeconds $timeout
+    if ($result.status -eq 'reconcile_failed') { throw "production reconcile failed: $($result.message)" }
+    return $result
 }
-function Test-ExternalProduction([string[]]$Urls) {
-    foreach($url in $Urls){$r=Get-HttpResult $url;if($r.status -ne 200 -or $r.xrobots){throw "external check failed: $url"};Write-Host "PASS: $url"}
-    if((Get-HttpResult 'https://btsys.ru/__bts_release_probe_missing__').status -ne 404){throw 'external 404 failed'}
-    $health=Get-HttpResult 'https://btsys.ru/api/health';if($health.status -ne 200 -or $health.body.Trim() -cne'{"ok":true}'){throw 'external backend health failed'}
+
+function Show-InfrastructureResult {
+    param([Parameter(Mandatory = $true)]$Details)
+    function Mark([bool]$Ok,[string]$Failure) { if ($Ok) { 'PASS' } else { $Failure } }
+    Write-Host 'Production infrastructure:'
+    Write-Host "Node ............... $(Mark $Details.node 'MISSING')"
+    Write-Host "IIS ................ $(Mark $Details.iis 'MISSING')"
+    Write-Host "URL Rewrite ........ $(Mark $Details.url_rewrite 'MISSING')"
+    Write-Host "ARR ................ $(Mark $Details.arr 'MISSING')"
+    Write-Host "Worker ............. $(Mark $Details.worker 'UPDATE REQUIRED')"
+    Write-Host "Ensure ............. $(Mark $Details.ensure 'UPDATE REQUIRED')"
+    Write-Host "Scheduled Task ..... $(Mark $Details.scheduled_task 'REPAIR REQUIRED')"
+    Write-Host "BTSContactApi ....... $(if (-not $Details.service_installed) { 'MISSING' } elseif ($Details.service_ready) { 'PASS' } else { 'REPAIR REQUIRED' })"
+    Write-Host "API proxy ........... $(if ($Details.api_proxy) { 'PASS' } elseif ($Details.backend_health) { 'REPAIR REQUIRED' } else { 'NOT READY' })"
+    Write-Host "SMTP environment ... $(Mark $Details.smtp_environment 'MISSING/INVALID')"
+    Write-Host "Infrastructure action: $(if ($Details.reconcile_required) { 'RECONCILE' } else { 'PASS' })"
+}
+
+function Get-WinSW {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $WinSWCache) -Force | Out-Null
+    if (Test-Path -LiteralPath $WinSWCache) {
+        $signature = Get-AuthenticodeSignature -FilePath $WinSWCache
+        if ($signature.Status -eq 'Valid') { return $WinSWCache }
+        Remove-Item -LiteralPath $WinSWCache -Force
+    }
+    Invoke-WebRequest -UseBasicParsing -Uri $WinSWUrl -OutFile $WinSWCache
+    $signature = Get-AuthenticodeSignature -FilePath $WinSWCache
+    if ($signature.Status -ne 'Valid') {
+        Remove-Item -LiteralPath $WinSWCache -Force
+        throw "Downloaded WinSW signature is not valid: $($signature.Status)"
+    }
+    return $WinSWCache
+}
+
+function Get-HttpResult {
+    param([Parameter(Mandatory = $true)][string]$Url)
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -MaximumRedirection 5 -TimeoutSec 20
+        return [pscustomobject]@{ status=[int]$response.StatusCode; xrobots=[string]$response.Headers['X-Robots-Tag']; body=[string]$response.Content }
+    }
+    catch {
+        if ($_.Exception.Response) { return [pscustomobject]@{ status=[int]$_.Exception.Response.StatusCode; xrobots=''; body='' } }
+        throw
+    }
+}
+
+function Test-ExternalProduction {
+    param([Parameter(Mandatory = $true)][string[]]$Urls)
+    foreach ($url in $Urls) {
+        $result = Get-HttpResult $url
+        if ($result.status -ne 200 -or $result.xrobots) { throw "external check failed: $url" }
+        Write-Host "PASS: $url"
+    }
+    if ((Get-HttpResult 'https://btsys.ru/__bts_release_probe_missing__').status -ne 404) { throw 'external 404 failed' }
+    $health = Get-HttpResult 'https://btsys.ru/api/health'
+    if ($health.status -ne 200 -or $health.body.Trim() -cne '{"ok":true}') { throw 'external backend health failed' }
 }
 
 Write-Host '=== release precheck ==='
-$git=Get-Git;if(-not$git){throw 'git executable not found'}
-foreach($path in @($dist,$backend,$preflight,$ensureSource,$workerSource,$serviceConfigSource)){if(-not(Test-Path $path)){throw "required path missing: $path"}}
-$branch=(& $git branch --show-current).Trim();if($branch -ne 'main'){throw "wrong branch: $branch"}
-$changes = @(& $git status --porcelain)
-if ($changes.Count -ne 0) { throw 'git working tree is not clean' }
-$head=(& $git rev-parse HEAD).Trim()
-& $git fetch origin main --prune;if($LASTEXITCODE -ne 0){throw 'git fetch failed'}
-if($head -ne (& $git rev-parse origin/main).Trim()){throw 'local main differs from origin/main; Pull and inspect staging again'}
-if(-not(Test-Path $sshKey)){throw "SSH private key not found: $sshKey"}
-Invoke-Ssh 'cmd.exe /d /c exit 0'|Out-Null
-$expectedWorkerHash=(Get-FileHash $workerSource -Algorithm SHA256).Hash.ToLower()
-$production=Get-ProductionState
-$infrastructureReady=Show-Infrastructure $production $expectedWorkerHash
-$frontendTree=(& $git rev-parse 'HEAD:dist').Trim();$backendTree=(& $git rev-parse 'HEAD:backend').Trim()
-$productionFrontendTree=[string]$production.frontend_tree
-if(-not$productionFrontendTree -and [string]$production.frontend_commit -match'^[0-9a-f]{40}$'){$candidate=@(&$git rev-parse "$($production.frontend_commit):dist" 2>$null);if($LASTEXITCODE -eq 0){$productionFrontendTree=($candidate-join'').Trim()}}
-$frontendChanged=$frontendTree -ne $productionFrontendTree;$backendChanged=$backendTree -ne [string]$production.backend_tree
-Write-Host "FRONTEND action: $(if($frontendChanged){'DEPLOY'}else{'SKIP'})"
-Write-Host "BACKEND action: $(if($backendChanged){'DEPLOY'}else{'SKIP'})"
-Write-Host '=== existing project preflight ==='
-# The read-only state query must precede preflight so an unchanged backend gets
-# a true SKIP: no npm install, packaging, upload, switch, restart, or state write.
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $preflight -BackendChanged:$backendChanged
-if($LASTEXITCODE -ne 0){throw 'project preflight failed'}
-$postPreflightChanges = @(& $git status --porcelain)
-if($head -ne (& $git rev-parse HEAD).Trim() -or $postPreflightChanges.Count -ne 0){throw 'repository changed during preflight'}
-& $git fetch origin main --prune;if($LASTEXITCODE -ne 0){throw 'final git fetch failed'}
-if($head -ne (& $git rev-parse origin/main).Trim()){throw 'origin/main changed during preflight; Pull and inspect staging again'}
-if($dryrun){Write-Host 'PASS: dry run is read-only; nothing was uploaded or changed on production.';return}
+$Git = Get-Git
+if (-not $Git) { throw 'git executable not found' }
+foreach ($path in @($Dist,$Backend,$Preflight,$EnsureSource,$WorkerSource,$ServiceConfigSource)) {
+    if (-not (Test-Path -LiteralPath $path)) { throw "required path missing: $path" }
+}
+$branch = (& $Git branch --show-current).Trim()
+if ($branch -ne 'main') { throw "wrong branch: $branch" }
+$initialChanges = @(& $Git status --porcelain)
+if ($initialChanges.Count -ne 0) { throw 'git working tree is not clean' }
+$head = (& $Git rev-parse HEAD).Trim()
+& $Git fetch origin main --prune
+if ($LASTEXITCODE -ne 0) { throw 'git fetch failed' }
+if ($head -ne (& $Git rev-parse origin/main).Trim()) { throw 'local main differs from origin/main; Pull and inspect staging again' }
+if (-not (Test-Path -LiteralPath $SshKey)) { throw "SSH private key not found: $SshKey" }
+Invoke-Ssh -Command 'cmd.exe /d /c exit 0' | Out-Null
 
-Write-Host '=== production infrastructure reconcile ==='
-$winSW=Get-WinSW
-$infraId="infra_$($head.Substring(0,12))"
-$remoteInfra="C:\ProgramData\BTS\deploy\incoming\$infraId"
-Invoke-Ssh "powershell.exe -NoProfile -Command `"New-Item -ItemType Directory -Force '$remoteInfra'|Out-Null`""|Out-Null
-Copy-ToProduction $ensureSource "C:/ProgramData/BTS/deploy/incoming/$infraId/ensure-production.ps1"
-Copy-ToProduction $workerSource "C:/ProgramData/BTS/deploy/incoming/$infraId/worker-v2.ps1"
-Copy-ToProduction $serviceConfigSource "C:/ProgramData/BTS/deploy/incoming/$infraId/BTS.ContactApi.xml"
-Copy-ToProduction $winSW "C:/ProgramData/BTS/deploy/incoming/$infraId/WinSW-x64.exe"
-Invoke-Ensure $remoteInfra
-$production=Get-ProductionState;Show-Infrastructure $production $expectedWorkerHash|Out-Null
-# Re-read state after reconcile: it can recover missing state directories without inventing component versions.
+Write-Host '=== read-only SYSTEM infrastructure check ==='
+$checkResult = Invoke-ReconcileRequest -Mode check
+$production = $checkResult.details
+Show-InfrastructureResult $production
+if (-not $production.prerequisites) { throw 'Base production prerequisite is missing. No deployment is allowed.' }
+$frontendTree = (& $Git rev-parse 'HEAD:dist').Trim()
+$backendTree = (& $Git rev-parse 'HEAD:backend').Trim()
 $productionFrontendTree = [string]$production.frontend_tree
 if (-not $productionFrontendTree -and [string]$production.frontend_commit -match '^[0-9a-f]{40}$') {
-    $candidate = @(& $git rev-parse "$($production.frontend_commit):dist" 2>$null)
+    $candidate = @(& $Git rev-parse "$($production.frontend_commit):dist" 2>$null)
     if ($LASTEXITCODE -eq 0) { $productionFrontendTree = ($candidate -join '').Trim() }
 }
-$frontendChanged=$frontendTree -ne $productionFrontendTree;$backendChanged=$backendTree -ne [string]$production.backend_tree
-if(-not$frontendChanged -and -not $backendChanged){Write-Host 'PASS: infrastructure is consistent; FRONTEND SKIP; BACKEND SKIP.';return}
+$frontendChanged = $frontendTree -ne $productionFrontendTree
+$backendChanged = $backendTree -ne [string]$production.backend_tree
+Write-Host "FRONTEND action: $(if ($frontendChanged) { 'DEPLOY' } else { 'SKIP' })"
+Write-Host "BACKEND action: $(if ($backendChanged) { 'DEPLOY' } else { 'SKIP' })"
 
-$short=$head.Substring(0,12);$releaseId="$(Get-Date -Format yyyyMMdd-HHmmss)_$short";$outDir=Join-Path $outRoot $releaseId
-New-Item -ItemType Directory -Path $outDir -Force|Out-Null;Add-Type -AssemblyName System.IO.Compression.FileSystem
-$components=[ordered]@{}
-if($frontendChanged){$archive=Join-Path $outDir "$releaseId.frontend.zip";[IO.Compression.ZipFile]::CreateFromDirectory($dist,$archive,[IO.Compression.CompressionLevel]::Optimal,$false);$components.frontend=[ordered]@{changed=$true;tree=$frontendTree;archive=[IO.Path]::GetFileName($archive);sha256=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()}}else{$components.frontend=[ordered]@{changed=$false;tree=$frontendTree;archive='';sha256=''}}
-if($backendChanged){. $backendPackaging;$archive=Join-Path $outDir "$releaseId.backend.zip";New-BackendArtifact -BackendSource $backend -WorkingDirectory (Join-Path $outDir backend-runtime) -ArchivePath $archive -SkipInstall|Out-Null;$components.backend=[ordered]@{changed=$true;tree=$backendTree;archive=[IO.Path]::GetFileName($archive);sha256=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()}}else{$components.backend=[ordered]@{changed=$false;tree=$backendTree;archive='';sha256=''}}
-$request=Join-Path $outDir "$releaseId.request.json";[IO.File]::WriteAllText($request,([ordered]@{release_id=$releaseId;commit=$head;components=$components}|ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding($false)))
-foreach($name in @('backend','frontend')){if($components[$name].changed){Copy-ToProduction (Join-Path $outDir $components[$name].archive) "C:/ProgramData/BTS/deploy/incoming/$($components[$name].archive)"}}
-Copy-ToProduction $request "C:/ProgramData/BTS/deploy/incoming/$releaseId.request.json"
-$result=Get-RemoteResult $releaseId @('deployed','rolled_back','failed');if($result.status -ne 'deployed'){throw "worker deployment failed: $($result.status): $($result.message)"}
-Invoke-Ensure $remoteInfra
-[xml]$sitemap=Get-Content (Join-Path $dist sitemap.xml) -Raw;$urls=@($sitemap.SelectNodes("//*[local-name()='loc']")|ForEach-Object{$_.InnerText.Trim()})
-try { Test-ExternalProduction $urls }
-catch {
-    $externalError=$_.Exception.Message;$rollbackPath=Join-Path $outDir "$releaseId.rollback.json"
-    [IO.File]::WriteAllText($rollbackPath,([ordered]@{release_id=$releaseId;components=[ordered]@{frontend=$frontendChanged;backend=$backendChanged}}|ConvertTo-Json),(New-Object Text.UTF8Encoding($false)))
-    Copy-ToProduction $rollbackPath "C:/ProgramData/BTS/deploy/incoming/$releaseId.rollback.json"
-    $rollback=Get-RemoteResult $releaseId @('rolled_back_external','rollback_request_failed')
-    try { Invoke-Ensure $remoteInfra } catch { Write-Warning "post-rollback infrastructure check failed: $($_.Exception.Message)" }
-    throw "external checks failed; rollback status $($rollback.status): $externalError"
+Write-Host '=== existing project preflight ==='
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Preflight -BackendChanged:$backendChanged
+if ($LASTEXITCODE -ne 0) { throw 'project preflight failed' }
+$postPreflightChanges = @(& $Git status --porcelain)
+if ($head -ne (& $Git rev-parse HEAD).Trim() -or $postPreflightChanges.Count -ne 0) { throw 'repository changed during preflight' }
+& $Git fetch origin main --prune
+if ($LASTEXITCODE -ne 0) { throw 'final git fetch failed' }
+if ($head -ne (& $Git rev-parse origin/main).Trim()) { throw 'origin/main changed during preflight; Pull and inspect staging again' }
+if ($dryrun) {
+    Write-Host 'PASS: dry run used CheckOnly through the SYSTEM worker; no infrastructure or site setting was changed.'
+    return
+}
+
+Write-Host '=== SYSTEM infrastructure reconcile ==='
+$winSW = Get-WinSW
+$reconcileResult = Invoke-ReconcileRequest -Mode apply -WinSWPath $winSW
+$production = $reconcileResult.details
+Show-InfrastructureResult $production
+$productionFrontendTree = [string]$production.frontend_tree
+if (-not $productionFrontendTree -and [string]$production.frontend_commit -match '^[0-9a-f]{40}$') {
+    $candidate = @(& $Git rev-parse "$($production.frontend_commit):dist" 2>$null)
+    if ($LASTEXITCODE -eq 0) { $productionFrontendTree = ($candidate -join '').Trim() }
+}
+$frontendChanged = $frontendTree -ne $productionFrontendTree
+$backendChanged = $backendTree -ne [string]$production.backend_tree
+if (-not $frontendChanged -and -not $backendChanged) {
+    Write-Host 'PASS: infrastructure is consistent; FRONTEND SKIP; BACKEND SKIP.'
+    return
+}
+
+$releaseId = "$(Get-Date -Format yyyyMMdd-HHmmss)_$($head.Substring(0,12))"
+$outDirectory = Join-Path $OutRoot $releaseId
+New-Item -ItemType Directory -Path $outDirectory -Force | Out-Null
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$components = [ordered]@{}
+if ($frontendChanged) {
+    $archive = Join-Path $outDirectory "$releaseId.frontend.zip"
+    [IO.Compression.ZipFile]::CreateFromDirectory($Dist,$archive,[IO.Compression.CompressionLevel]::Optimal,$false)
+    $components.frontend = [ordered]@{ changed=$true; tree=$frontendTree; archive=[IO.Path]::GetFileName($archive); sha256=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() }
+}
+else { $components.frontend = [ordered]@{ changed=$false; tree=$frontendTree; archive=''; sha256='' } }
+if ($backendChanged) {
+    . $BackendPackaging
+    $archive = Join-Path $outDirectory "$releaseId.backend.zip"
+    New-BackendArtifact -BackendSource $Backend -WorkingDirectory (Join-Path $outDirectory 'backend-runtime') -ArchivePath $archive -SkipInstall | Out-Null
+    $components.backend = [ordered]@{ changed=$true; tree=$backendTree; archive=[IO.Path]::GetFileName($archive); sha256=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() }
+}
+else { $components.backend = [ordered]@{ changed=$false; tree=$backendTree; archive=''; sha256='' } }
+$requestPath = Join-Path $outDirectory "$releaseId.request.json"
+$request = [ordered]@{ release_id=$releaseId; commit=$head; components=$components }
+[IO.File]::WriteAllText($requestPath, ($request | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+foreach ($name in @('backend','frontend')) {
+    if ($components[$name].changed) { Copy-ToProduction -LocalPath (Join-Path $outDirectory $components[$name].archive) -RemotePath "C:/ProgramData/BTS/deploy/incoming/$($components[$name].archive)" }
+}
+Copy-ToProduction -LocalPath $requestPath -RemotePath "C:/ProgramData/BTS/deploy/incoming/$releaseId.request.json"
+$result = Get-RemoteResult -RequestId $releaseId -TerminalStatuses @('deployed','rolled_back','failed')
+if ($result.status -ne 'deployed') { throw "worker deployment failed: $($result.status): $($result.message)" }
+
+Invoke-ReconcileRequest -Mode apply -WinSWPath $winSW | Out-Null
+[xml]$sitemap = Get-Content (Join-Path $Dist 'sitemap.xml') -Raw
+$urls = @($sitemap.SelectNodes("//*[local-name()='loc']") | ForEach-Object { $_.InnerText.Trim() })
+$externalOk = $false
+$externalError = ''
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+        Write-Host "external production checks: attempt $attempt/3"
+        Test-ExternalProduction $urls
+        $externalOk = $true
+        break
+    }
+    catch {
+        $externalError = $_.Exception.Message
+        if ($attempt -lt 3) { Start-Sleep -Seconds 5 }
+    }
+}
+if (-not $externalOk) {
+    $rollbackPath = Join-Path $outDirectory "$releaseId.rollback.json"
+    $rollback = [ordered]@{ release_id=$releaseId; components=[ordered]@{ frontend=$frontendChanged; backend=$backendChanged } }
+    [IO.File]::WriteAllText($rollbackPath, ($rollback | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    Copy-ToProduction -LocalPath $rollbackPath -RemotePath "C:/ProgramData/BTS/deploy/incoming/$releaseId.rollback.json"
+    $rollbackResult = Get-RemoteResult -RequestId $releaseId -TerminalStatuses @('rolled_back_external','rollback_request_failed')
+    try { Invoke-ReconcileRequest -Mode apply -WinSWPath $winSW | Out-Null } catch { Write-Warning "post-rollback reconcile failed: $($_.Exception.Message)" }
+    throw "external checks failed after three attempts; rollback status $($rollbackResult.status): $externalError"
 }
 Write-Host "PASS: production release $releaseId ($head)"
