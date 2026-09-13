@@ -39,6 +39,10 @@ try {
     if ($names -notcontains 'server.js') {
         throw 'server.js was not packaged'
     }
+
+    if ($names -notcontains 'start.js') {
+        throw 'start.js was not packaged'
+    }
 }
 finally {
     $zip.Dispose()

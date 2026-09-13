@@ -110,8 +110,22 @@ function Test-Frontend {
 }
 
 function Test-Backend {
-    $body = & curl.exe -fsS 'http://127.0.0.1:3001/api/health'
-    if ($LASTEXITCODE -ne 0 -or (($body | Out-String).Trim() -ne '{"ok":true}')) { throw 'backend health failed' }
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
+        $body = & curl.exe -fsS --connect-timeout 1 --max-time 2 'http://127.0.0.1:3001/api/health' 2>$null
+
+        if (
+            $LASTEXITCODE -eq 0 -and
+            (($body | Out-String).Trim() -ceq '{"ok":true}')
+        ) {
+            return
+        }
+
+        if ($attempt -lt 20) {
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    throw 'backend health failed after startup grace period'
 }
 
 function Set-BackendJunction([string]$Target) {
@@ -184,7 +198,13 @@ function Deploy-Request($Request, [string]$RequestPath) {
             if ($name -eq 'backend') { $backendTarget = $target } else { $frontendTarget = $target }
         }
         if ($backendChanged) {
-            if (-not (Test-Path (Join-Path $backendTarget 'server.js')) -or -not (Test-Path (Join-Path $backendTarget 'node_modules'))) { throw 'backend artifact is incomplete' }
+            if (
+                -not (Test-Path (Join-Path $backendTarget 'server.js')) -or
+                -not (Test-Path (Join-Path $backendTarget 'start.js')) -or
+                -not (Test-Path (Join-Path $backendTarget 'node_modules'))
+            ) {
+                throw 'backend artifact is incomplete'
+            }
             Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
             Set-BackendJunction $backendTarget
             Start-Service -Name $ServiceName

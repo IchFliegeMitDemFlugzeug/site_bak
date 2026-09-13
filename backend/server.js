@@ -1,10 +1,8 @@
 import express from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import nodemailer from 'nodemailer';
-import { pathToFileURL } from 'node:url';
 
-const HOST = '127.0.0.1';
-const PORT = 3001;
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function normalizeClientIp(value) {
@@ -92,8 +90,4 @@ export function createContactApp({ transport } = {}) {
 
   app.use((_error, _request, response, _next) => response.status(400).json({ ok: false, error: 'validation' }));
   return app;
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  createContactApp().listen(PORT, HOST, () => console.log(`Contact API is listening on http://${HOST}:${PORT}`));
 }

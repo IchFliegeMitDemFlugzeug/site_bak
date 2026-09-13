@@ -3,7 +3,7 @@
   <name>BTS Contact API</name>
   <description>Локальный backend формы обратной связи сайта btsys.ru.</description>
   <executable>C:\Program Files\nodejs\node.exe</executable>
-  <arguments>C:\Sites\BTS\backend-current\server.js</arguments>
+  <arguments>C:\Sites\BTS\backend-current\start.js</arguments>
   <workingdirectory>C:\Sites\BTS\backend-current</workingdirectory>
   <serviceaccount>
     <domain>NT AUTHORITY</domain>

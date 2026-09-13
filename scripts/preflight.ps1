@@ -110,7 +110,7 @@ Assert-Check (Test-Path $Dist) 'dist directory exists'
 Assert-Check (Test-Path $Backend) 'backend directory exists'
 
 # Backend is a separate deployable component and must never be copied into dist.
-foreach ($BackendFile in @('server.js','package.json','package-lock.json')) {
+foreach ($BackendFile in @('server.js','start.js','package.json','package-lock.json')) {
     Assert-Check (Test-Path (Join-Path $Backend $BackendFile)) "Backend file exists: $BackendFile"
 }
 Add-Type -AssemblyName System.Web.Extensions
@@ -195,7 +195,9 @@ if ($NpmCommand -and $BackendChanged) {
     & $NpmCommand.Source ci --prefix $Backend --omit=dev
     if ($LASTEXITCODE -eq 0) { Add-Pass 'backend package-lock is installable' } else { Add-Fail "backend npm ci failed: $LASTEXITCODE" }
     & node.exe --check (Join-Path $Backend 'server.js')
-    if ($LASTEXITCODE -eq 0) { Add-Pass 'backend JavaScript syntax is valid' } else { Add-Fail 'backend JavaScript syntax is invalid' }
+    if ($LASTEXITCODE -eq 0) { Add-Pass 'backend server.js syntax is valid' } else { Add-Fail 'backend server.js syntax is invalid' }
+    & node.exe --check (Join-Path $Backend 'start.js')
+    if ($LASTEXITCODE -eq 0) { Add-Pass 'backend start.js syntax is valid' } else { Add-Fail 'backend start.js syntax is invalid' }
     & $NpmCommand.Source test --prefix $Backend
     if ($LASTEXITCODE -eq 0) { Add-Pass 'backend tests passed' } else { Add-Fail "backend tests failed: $LASTEXITCODE" }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'scripts\test-backend-packaging.ps1')

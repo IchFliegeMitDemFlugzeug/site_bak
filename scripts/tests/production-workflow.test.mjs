@@ -8,6 +8,10 @@ const ensure = read('scripts/production/ensure-production.ps1');
 const worker = read('scripts/production/worker-v2.ps1');
 const bootstrap = read('scripts/production/bootstrap-worker-v2.ps1');
 const serviceXml = read('backend/config/BTS.ContactApi.xml');
+const backendServer = read('backend/server.js');
+const backendStart = read('backend/start.js');
+const backendPackage = read('backend/package.json');
+const stagingSetup = read('scripts/setup-staging-backend.ps1');
 const attributes = read('.gitattributes');
 
 test('release never invokes ensure directly over SSH', () => {
@@ -128,4 +132,27 @@ test('trusted assets use canonical LF and bootstrap pins exact WinSW bytes', () 
   assert.match(bootstrap, /\$expectedWinSWSize = 18243033/);
   assert.match(bootstrap, /Get-FileHash -LiteralPath \$WinSWSource -Algorithm SHA256/);
   assert.doesNotMatch(bootstrap, /Get-AuthenticodeSignature/);
+});
+test('contact API uses a dedicated startup entrypoint', () => {
+  assert.match(
+    serviceXml,
+    /<arguments>C:\\Sites\\BTS\\backend-current\\start\.js<\/arguments>/
+  );
+  assert.match(
+    backendStart,
+    /import \{ createContactApp \} from '\.\/server\.js';/
+  );
+  assert.match(backendStart, /createContactApp\(\)\.listen/);
+  assert.doesNotMatch(backendServer, /pathToFileURL|process\.argv\[1\]/);
+  assert.match(backendPackage, /"start"\s*:\s*"node start\.js"/);
+  assert.match(stagingSetup, /Join-Path \$Backend 'start\.js'/);
+});
+
+test('backend startup health check has a bounded grace period', () => {
+  assert.match(
+    worker,
+    /function Test-Backend[\s\S]*?for \(\$attempt = 1; \$attempt -le 20; \$attempt\+\+\)[\s\S]*?Start-Sleep -Seconds 1/
+  );
+  assert.match(worker, /backend health failed after startup grace period/);
+  assert.match(worker, /backendTarget 'start\.js'/);
 });

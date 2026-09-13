@@ -49,7 +49,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Node: $NodePath"
 Write-Host 'Starting BTS staging contact API...'
 
-& $NodePath (Join-Path $Backend 'server.js')
+& $NodePath (Join-Path $Backend 'start.js')
 
 if ($LASTEXITCODE -ne 0) {
     throw "backend exited with code: $LASTEXITCODE"
