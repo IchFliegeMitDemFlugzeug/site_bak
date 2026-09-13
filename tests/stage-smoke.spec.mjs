@@ -286,21 +286,24 @@ test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) =
 
   const dialog = page.locator('[data-contact-dialog]');
   const shell = page.locator('.contact-dialog__shell');
+  const firstInput = page.locator('.contact-dialog input').first();
 
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveClass(/is-open/);
   await expect(shell).toBeVisible();
 
-  // Wait for the 480 ms slide-in transition to reach its final geometry.
+  // Wait for the mobile fade transition to reach its final state.
   await page.waitForTimeout(550);
 
-  const state = await page.evaluate(() => {
+  const readState = () => page.evaluate(() => {
     const dialogElement = document.querySelector('[data-contact-dialog]');
     const shellElement = document.querySelector('.contact-dialog__shell');
     const inputElement = document.querySelector('.contact-dialog input');
 
     const dialogRect = dialogElement.getBoundingClientRect();
     const shellRect = shellElement.getBoundingClientRect();
+    const dialogStyle = getComputedStyle(dialogElement);
+    const shellStyle = getComputedStyle(shellElement);
 
     return {
       viewportWidth: window.innerWidth,
@@ -317,34 +320,60 @@ test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) =
         left: shellRect.left,
         top: shellRect.top,
         right: shellRect.right,
-        bottom: shellRect.bottom,
       },
 
+      rootOverflow: getComputedStyle(document.documentElement).overflow,
+      dialogOverflowY: dialogStyle.overflowY,
+      shellTransform: shellStyle.transform,
       inputFontSize: Number.parseFloat(
         getComputedStyle(inputElement).fontSize
       ),
     };
   });
 
+  const beforeFocus = await readState();
   const tolerance = 1;
 
-  expect(state.dialog.left).toBeGreaterThanOrEqual(-tolerance);
-  expect(state.dialog.top).toBeGreaterThanOrEqual(-tolerance);
-  expect(state.dialog.right).toBeLessThanOrEqual(
-    state.viewportWidth + tolerance
+  expect(beforeFocus.dialog.left).toBeGreaterThanOrEqual(-tolerance);
+  expect(beforeFocus.dialog.top).toBeGreaterThanOrEqual(-tolerance);
+  expect(beforeFocus.dialog.right).toBeLessThanOrEqual(
+    beforeFocus.viewportWidth + tolerance
   );
-  expect(state.dialog.bottom).toBeLessThanOrEqual(
-    state.viewportHeight + tolerance
-  );
-
-  expect(state.shell.left).toBeGreaterThanOrEqual(-tolerance);
-  expect(state.shell.top).toBeGreaterThanOrEqual(-tolerance);
-  expect(state.shell.right).toBeLessThanOrEqual(
-    state.viewportWidth + tolerance
-  );
-  expect(state.shell.bottom).toBeLessThanOrEqual(
-    state.viewportHeight + tolerance
+  expect(beforeFocus.dialog.bottom).toBeLessThanOrEqual(
+    beforeFocus.viewportHeight + tolerance
   );
 
-  expect(state.inputFontSize).toBeGreaterThanOrEqual(16);
+  expect(beforeFocus.shell.left).toBeGreaterThanOrEqual(
+    beforeFocus.dialog.left - tolerance
+  );
+  expect(beforeFocus.shell.right).toBeLessThanOrEqual(
+    beforeFocus.dialog.right + tolerance
+  );
+
+  // Native modal geometry must not depend on a custom root scroll lock.
+  expect(beforeFocus.rootOverflow).not.toBe('hidden');
+
+  // The dialog itself owns vertical scrolling.
+  expect(beforeFocus.dialogOverflowY).toBe('auto');
+
+  // Mobile Safari must not receive the translated panel animation.
+  expect(beforeFocus.shellTransform).toBe('none');
+
+  // iOS Safari must not auto-zoom focused form controls.
+  expect(beforeFocus.inputFontSize).toBeGreaterThanOrEqual(16);
+
+  // Focusing a real form field must not move the visible dialog out of bounds.
+  await firstInput.click();
+  await page.waitForTimeout(150);
+
+  const afterFocus = await readState();
+
+  expect(afterFocus.dialog.left).toBeGreaterThanOrEqual(-tolerance);
+  expect(afterFocus.dialog.top).toBeGreaterThanOrEqual(-tolerance);
+  expect(afterFocus.dialog.right).toBeLessThanOrEqual(
+    afterFocus.viewportWidth + tolerance
+  );
+  expect(afterFocus.dialog.bottom).toBeLessThanOrEqual(
+    afterFocus.viewportHeight + tolerance
+  );
 });

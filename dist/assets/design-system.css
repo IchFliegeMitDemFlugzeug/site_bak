@@ -1074,12 +1074,13 @@ a[href^="mailto:"] {
 
 /* Central mobile form-control policy. */
 @media (max-width: 767px) {
-  input[data-type],
-  textarea[data-type],
-  select[data-type],
-  input:not([data-type]),
-  textarea:not([data-type]),
-  select:not([data-type]) {
+  /*
+   * The component-aware selector intentionally outranks typography roles
+   * such as [data-component] [data-type="T-BODY-S"] without !important.
+   */
+  :is([data-block-id], [data-component]) :is(input, textarea, select)[data-type],
+  :is(input, textarea, select)[data-type],
+  :is(input, textarea, select):not([data-type]) {
     font-size: var(--mobile-form-control-font-size);
   }
 }
