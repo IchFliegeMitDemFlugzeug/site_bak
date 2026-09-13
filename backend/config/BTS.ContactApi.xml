@@ -5,6 +5,10 @@
   <executable>C:\Program Files\nodejs\node.exe</executable>
   <arguments>C:\Sites\BTS\backend-current\server.js</arguments>
   <workingdirectory>C:\Sites\BTS\backend-current</workingdirectory>
+  <serviceaccount>
+    <domain>NT AUTHORITY</domain>
+    <user>LocalService</user>
+  </serviceaccount>
   <startmode>Automatic</startmode>
   <stoptimeout>15sec</stoptimeout>
   <onfailure action="restart" delay="10 sec" />

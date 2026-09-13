@@ -2,7 +2,7 @@
 
 Статус документа: канонический технический слепок инфраструктуры.
 
-Дата контрольной фиксации: 2026-09-11.
+Дата контрольной фиксации: 2026-09-13.
 
 Репозиторий: `IchFliegeMitDemFlugzeug/site_bak`
 
@@ -12,11 +12,11 @@
 
 ## CURRENT STATE
 
-До ручного успешного запуска `scripts\production\migrate-two-component.ps1` production работает по описанной ниже проверенной static-only схеме. Все исторические сведения, пути, проверки и failure cases в разделах 1–30 относятся к этому фактическому состоянию.
+Production в момент этой фиксации остаётся static-only, но это штатное исходное состояние постоянной release-цепочки, а не отдельная пользовательская migration-фаза. Первый live-запуск `scripts\release-prod.ps1` сам подготавливает application infrastructure, разворачивает backend и только после строгого local health включает публичный `/api` proxy. Исторические сведения, пути и failure cases в разделах 1–30 сохраняются.
 
-## TARGET STATE AFTER MIGRATION
+## КАНОНИЧЕСКОЕ СОСТОЯНИЕ ПОСЛЕ RECONCILE
 
-После отдельно согласованной миграции к существующему статическому frontend добавляются Node.js backend runtime, immutable backend releases, junction `backend-current`, WinSW-служба `BTSContactApi`, постоянный IIS `/api/*` proxy и selective deployment по tree hash. Подробное целевое состояние описано в разделе 31. До реального выполнения и проверки миграции оно не считается текущим production state.
+К существующему статическому frontend постоянный release-клиент добавляет и затем поддерживает Node.js backend runtime, immutable backend releases, junction `backend-current`, WinSW-службу `BTSContactApi`, IIS `/api/*` proxy и selective deployment по tree hash. Подробности описаны в разделе 31. Пользователь всегда запускает одну и ту же цепочку независимо от номера релиза.
 
 ---
 
@@ -45,27 +45,31 @@ stage.btsys.ru показывает локальный dist
         ↓
 ручная визуальная проверка пользователем
         ↓
+scripts/release-prod.ps1 -dryrun
+        ↓
 scripts/release-prod.ps1
         ↓
 автоматический preflight + Playwright
         ↓
 повторная сверка локального HEAD с origin/main
         ↓
-упаковка именно текущего dist + SHA-256
+production infrastructure reconcile
+        ↓
+selective упаковка изменённых frontend/backend + SHA-256
         ↓
 SSH/SCP на Selectel
         ↓
-production worker
+production worker v2
         ↓
-новая immutable release-папка
+новые immutable release-папки только изменённых компонентов
         ↓
-переключение IIS physical path
+переключение frontend physical path и/или backend-current
         ↓
 внутренние health checks
         ↓
 внешние health checks с немецкого сервера
         ↓
-PASS
+PASS / automatic component rollback
 ```
 
 Если проверка после переключения не проходит, выполняется автоматический rollback.
@@ -610,10 +614,17 @@ C:\ProgramData\BTS\deploy\
         legacy-production-path.txt
     logs\
         worker.log
-    worker.ps1
+    worker.ps1.before-v2-<timestamp>
+    trusted\
+        worker.ps1
+        ensure-production.ps1
+        WinSW-x64.exe
+        BTS.ContactApi.xml
 ```
 
-`incoming\` — зона загрузки ZIP и request/rollback JSON.
+`incoming\` — transport-зона загрузки component ZIP и request/rollback/reconcile JSON. Исполняемые `.ps1`/`.exe` и service XML через неё не доставляются.
+
+`trusted\` — закрытая зона infrastructure code/assets; FullControl имеют только `SYSTEM` и локальные `Administrators`, наследование ACL отключено, `bts-deploy` не имеет Write/Modify.
 
 `outbox\` — результат обработки конкретного release_id.
 
@@ -630,7 +641,7 @@ C:\ProgramData\BTS\deploy\
 Worker:
 
 ```text
-C:\ProgramData\BTS\deploy\worker.ps1
+C:\ProgramData\BTS\deploy\trusted\worker.ps1
 ```
 
 Scheduled Task:
@@ -850,27 +861,28 @@ Dry run:
 - проверяет Git;
 - делает fetch;
 - проверяет `HEAD == origin/main`;
+- передаёт специальный `mode=check` request существующему SYSTEM worker;
 - запускает preflight;
 - запускает Playwright через preflight;
 - снова проверяет GitHub;
-- упаковывает текущий `dist`;
-- считает SHA-256;
-- создаёт request JSON;
-- ничего не отправляет на production.
+- показывает `RECONCILE/PASS` и `DEPLOY/SKIP`;
+- не скачивает WinSW и не пакует компоненты;
+- кроме служебных request/result-файлов не изменяет каталоги, службы, IIS, worker, component state или сайт.
 
 ### 20.2. Live release
 
 Live release дополнительно:
 
 1. проверяет SSH-доступность production;
-2. загружает ZIP через SCP;
-3. только после завершения ZIP загружает request JSON;
-4. ожидает результат worker;
-5. требует status `deployed`;
-6. выполняет внешние production checks;
-7. при внешней ошибке создаёт rollback request;
-8. ждёт подтверждения rollback;
-9. выдаёт PASS только при полном успехе.
+2. формирует reconcile JSON с ожидаемыми hashes versioned worker/ensure/XML, но не загружает infrastructure code;
+3. SYSTEM worker сверяет hashes с закрытыми trusted files и запускает trusted `ensure-production.ps1` до component switch;
+4. перечитывает component state и пакует только изменённые компоненты;
+5. загружает ZIP через SCP и только затем request JSON;
+6. ожидает status `deployed` от worker v2;
+7. повторно отправляет reconcile request; SYSTEM worker финализирует service/proxy после первого backend;
+8. выполняет внешние production checks до трёх раз с паузой 5 секунд;
+9. только после третьей внешней ошибки создаёт rollback request, ждёт rollback и снова проверяет infrastructure;
+10. выдаёт PASS только при полном успехе.
 
 ZIP передаётся первым, request JSON — последним. Это не позволяет worker начать обработку недокачанного архива.
 
@@ -887,7 +899,8 @@ Release-клиент создаёт локальные пакеты в:
 Внутри:
 
 ```text
-<release_id>.zip
+<release_id>.frontend.zip (только если frontend изменён)
+<release_id>.backend.zip (только если backend изменён)
 <release_id>.request.json
 <release_id>.rollback.json
 ```
@@ -1102,7 +1115,7 @@ curl.exe -sS -o nul -w "%{http_code}" https://btsys.ru/
 какой commit разрешён        → local HEAD == origin/main
 production release logic    → scripts/release-prod.ps1
 preflight logic             → scripts/preflight.ps1
-production switch logic     → C:\ProgramData\BTS\deploy\worker.ps1
+production switch logic     → C:\ProgramData\BTS\deploy\trusted\worker.ps1
 активный production path    → IIS BTS physical path
 активный release metadata   → C:\ProgramData\BTS\deploy\state\
 архитектура инфраструктуры  → INFRASTRUCTURE.md
@@ -1131,7 +1144,7 @@ production switch logic     → C:\ProgramData\BTS\deploy\worker.ps1
 
 ---
 
-## 31. Целевая двухкомпонентная схема после миграции
+## 31. Постоянная двухкомпонентная схема
 
 ### 31.1. Компоненты и production runtime
 
@@ -1148,15 +1161,15 @@ C:\ProgramData\BTS\contact-api\BTSContactApi.exe
 C:\ProgramData\BTS\contact-api\BTSContactApi.xml
 ```
 
-`backend-current` — стабильный NTFS junction на immutable release. WinSW binary хранится вне Git; automatic service `BTSContactApi` запускает `C:\Sites\BTS\backend-current\server.js`. Backend слушает только `127.0.0.1:3001`.
+`backend-current` — стабильный NTFS junction на immutable release. Проверенный WinSW хранится в закрытом `C:\ProgramData\BTS\deploy\trusted` и попадает туда только через Administrator bootstrap; обычный release не загружает `.ps1`, `.exe` или service XML в `incoming`. Production не обращается к package registry. Служба `BTSContactApi` запускает `C:\Sites\BTS\backend-current\server.js` от встроенной учётной записи `NT AUTHORITY\LocalService`, а не от `LocalSystem`. LocalService получает только read/execute на service/backend paths и modify на `C:\ProgramData\BTS\contact-api\logs`; прав на IIS, deploy, Git и staging у службы нет. До первого backend она установлена с Manual startup и не изображает успешный health; при валидном backend работает как Automatic. Backend слушает только `127.0.0.1:3001`.
 
 IIS URL Rewrite + ARR хранит постоянное site-level правило вне `dist`: `/api/*` → `http://127.0.0.1:3001/api/*`. ARR добавляет фактический client IP в `X-Forwarded-For`; Express доверяет эту цепочку только когда непосредственный peer — loopback IIS. Bindings, HTTPS и certificates не меняются.
 
 ### 31.3. Версии, selective deploy и state
 
-Локальные версии — `git rev-parse HEAD:dist` и `git rev-parse HEAD:backend`. Production хранит marker `deployment-schema-version.txt` со значением `2`, а также `current-frontend-tree.txt`, `current-frontend-commit.txt`, `current-backend-tree.txt`, `current-backend-commit.txt`, `current-backend-release.txt`. Старые `current-release.txt` и `current-commit.txt` сохраняют значение frontend path/commit. Пока marker отсутствует или отличается от `2`, новый release-клиент немедленно останавливается до preflight, упаковки и любых production-изменений.
+Локальные версии — `git rev-parse HEAD:dist` и `git rev-parse HEAD:backend`. Production хранит внутренний protocol marker `deployment-schema-version.txt` со значением `2`, а также `current-frontend-tree.txt`, `current-frontend-commit.txt`, `current-backend-tree.txt`, `current-backend-commit.txt`, `current-backend-release.txt`. Старые `current-release.txt` и `current-commit.txt` сохраняют значение frontend path/commit. Отсутствующий marker означает `RECONCILE`, а не требование ручной миграции; `ensure-production.ps1` записывает его после подготовки worker/protocol.
 
-Компонент с совпавшим tree получает настоящий `SKIP`: без `npm ci`, упаковки, upload, новой release-папки, switch/restart и state update. Если оба совпали, release завершает `PASS: nothing changed`. Для точного плана `-DryRun` читает production state через SSH, поэтому также требует доступного SSH и выключенного AmneziaVPN на Selectel.
+Компонент с совпавшим tree получает настоящий `SKIP`: без `npm ci`, упаковки, upload, новой release-папки, switch/restart и state update. Если оба совпали, live release всё равно исправляет application infrastructure при необходимости, после чего завершается без component deployment. Для точного плана `-DryRun` отправляет только `mode=check` control request: worker запускает канонический `ensure-production.ps1 -CheckOnly` под SYSTEM и возвращает единый state в outbox. CheckOnly не изменяет application infrastructure или сайт.
 
 При первом запуске без `current-frontend-tree.txt` клиент использует старый `current-commit.txt` и локально вычисляет `<commit>:dist`. Если commit нельзя безопасно разрешить, frontend считается изменившимся.
 
@@ -1168,12 +1181,28 @@ IIS URL Rewrite + ARR хранит постоянное site-level правил�
 
 ### 31.5. Staging backend
 
-Frontend staging остаётся `<repo>\dist` сайта `BTS-STAGE`. `scripts\configure-staging-iis.ps1` один раз добавляет только staging site-level `/api/*` proxy после IIS backup. `scripts\setup-staging-backend.ps1` запускает backend с отдельным `C:\ProgramData\BTS\staging-contact-api.env`; production secrets не используются, порт 3001 наружу не открывается, `POTOK_WebApp` не затрагивается.
+Frontend staging остаётся `<repo>\dist` сайта `BTS-STAGE`. `scripts\configure-staging-iis.ps1` один раз добавляет только staging site-level `/api/*` proxy после IIS backup. `scripts\setup-staging-backend.ps1` запускает backend с локальным ignored-файлом `<repo>\backend\.env`; production secrets не копируются, порт 3001 наружу не открывается, `POTOK_WebApp` не затрагивается.
 
-### 31.6. Однократная migration и её rollback
+### 31.6. Постоянный infrastructure reconcile
 
-Administrator вручную запускает `scripts\production\migrate-two-component.ps1` с готовым backend ZIP и внешним WinSW. До любых изменений script проверяет Administrator, Node.js, IIS, URL Rewrite, ARR, WinSW input, backend ZIP и все непустые `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `CONTACT_TO`; порт обязан быть числом 1–65535. Затем создаются IIS backup, backup worker/state и migration metadata, не меняющие active frontend.
+`scripts\production\ensure-production.ps1` используется каждым release и запускается только worker под `SYSTEM`, никогда напрямую SSH-пользователем. `-CheckOnly` исключительно читает и сообщает состояние. Обычный режим до любых mutations проверяет base prerequisites: Node.js, IIS site `BTS`, URL Rewrite, ARR, непустые machine variables `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `CONTACT_TO` и целочисленный `SMTP_PORT` в диапазоне 1–65535. Он не устанавливает Windows-компоненты и никогда не выводит значение `SMTP_PASS`.
 
-Только после backup создаются backend storage/junction/service, постоянный API proxy и worker v2; затем выполняется backend health. `scripts\production\rollback-migration.ps1` восстанавливает IIS backup, worker, state, прежний junction и прежнее состояние службы. Frontend releases, baseline `20260911-193310_legacy-prod` и legacy production не удаляются.
+Live reconcile идемпотентно создаёт служебные каталоги, синхронизирует worker v2, чинит action существующей Scheduled Task без замены разумных triggers/settings, устанавливает или чинит WinSW-службу и marker протокола. Если backend ещё отсутствует, proxy rule не создаётся, служба остаётся Manual, после чего worker разворачивает первый backend. Повторный ensure требует strict body `{"ok":true}`, переводит службу в Automatic и включает/чинит ARR proxy и правило `BTS API reverse proxy`. Frontend releases, baseline `20260911-193310_legacy-prod` и legacy production не удаляются.
 
-SMTP values находятся только в machine environment production. Пароли не входят в Git, ZIP или frontend. После фактической миграции и проверки заголовок CURRENT STATE должен быть обновлён отдельным осознанным изменением документации.
+Отдельный Administrator-шаг — `scripts\production\bootstrap-worker-v2.ps1`. Он сохраняет backup legacy worker, создаёт `C:\ProgramData\BTS\deploy\trusted`, запрещает наследование ACL, оставляет FullControl только `SYSTEM` и локальным `Administrators`, явно удаляет grant `bts-deploy`, копирует туда worker/ensure/WinSW/XML и направляет SYSTEM Scheduled Task на trusted worker. Он не создаёт backend, службу, IIS proxy или release и потому не является migration сайта. Повторный bootstrap нужен только при осознанном обновлении trusted infrastructure files. Обычный `release-prod.ps1` передаёт исключительно `*.reconcile.json`; worker локально проверяет trusted hashes, запускает trusted CheckOnly/apply под SYSTEM и пишет `checked/reconciled/bootstrap_required/reconcile_failed` в outbox. `bts-deploy` остаётся обычным пользователем с прежними правами только на transport folders.
+
+Bootstrap-команда запускается из временно доставленной на production папки с четырьмя проверенными infrastructure files:
+
+```powershell
+.\bootstrap-worker-v2.ps1 `
+    -WorkerSource .\worker-v2.ps1 `
+    -EnsureSource .\ensure-production.ps1 `
+    -ServiceConfigSource .\BTS.ContactApi.xml `
+    -WinSWSource .\WinSW-x64.exe
+```
+
+После PASS временную папку можно удалить. Созданный рядом с production worker файл `worker.ps1.before-v2-<timestamp>` сохраняет только аварийную копию legacy worker и не является альтернативным release workflow.
+
+Component rollback остаётся в worker v2 и возвращает только frontend physical path и/или `backend-current`, перезапускает backend и выполняет health. Он не отменяет исправления worker, Scheduled Task, службы или ARR; после внешнего rollback release-клиент повторно вызывает ensure для консистентности. Отдельные `migrate-two-component.ps1` и `rollback-migration.ps1` удалены, чтобы не существовало второго способа настройки production.
+
+SMTP values находятся только в machine environment production. Пароли не входят в Git, ZIP, JSON results, логи или frontend.
