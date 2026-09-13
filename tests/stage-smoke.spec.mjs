@@ -268,3 +268,83 @@ test('primary navigation works', async ({ page }, testInfo) => {
     await expect(page).toHaveURL(new RegExp(`${path.replaceAll('/', '\\/')}$`));
   }
 });
+
+test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) => {
+  test.skip(
+    testInfo.project.name !== 'mobile-chromium',
+    'This check belongs to the mobile layout.'
+  );
+
+  await page.goto('/', {
+    waitUntil: 'domcontentloaded',
+  });
+
+  await page.locator('[data-menu-toggle]').click();
+  await expect(page.locator('nav[data-navigation]')).toHaveClass(/is-open/);
+
+  await page.locator('.nav__contact').click();
+
+  const dialog = page.locator('[data-contact-dialog]');
+  const shell = page.locator('.contact-dialog__shell');
+
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveClass(/is-open/);
+  await expect(shell).toBeVisible();
+
+  // Wait for the 480 ms slide-in transition to reach its final geometry.
+  await page.waitForTimeout(550);
+
+  const state = await page.evaluate(() => {
+    const dialogElement = document.querySelector('[data-contact-dialog]');
+    const shellElement = document.querySelector('.contact-dialog__shell');
+    const inputElement = document.querySelector('.contact-dialog input');
+
+    const dialogRect = dialogElement.getBoundingClientRect();
+    const shellRect = shellElement.getBoundingClientRect();
+
+    return {
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+
+      dialog: {
+        left: dialogRect.left,
+        top: dialogRect.top,
+        right: dialogRect.right,
+        bottom: dialogRect.bottom,
+      },
+
+      shell: {
+        left: shellRect.left,
+        top: shellRect.top,
+        right: shellRect.right,
+        bottom: shellRect.bottom,
+      },
+
+      inputFontSize: Number.parseFloat(
+        getComputedStyle(inputElement).fontSize
+      ),
+    };
+  });
+
+  const tolerance = 1;
+
+  expect(state.dialog.left).toBeGreaterThanOrEqual(-tolerance);
+  expect(state.dialog.top).toBeGreaterThanOrEqual(-tolerance);
+  expect(state.dialog.right).toBeLessThanOrEqual(
+    state.viewportWidth + tolerance
+  );
+  expect(state.dialog.bottom).toBeLessThanOrEqual(
+    state.viewportHeight + tolerance
+  );
+
+  expect(state.shell.left).toBeGreaterThanOrEqual(-tolerance);
+  expect(state.shell.top).toBeGreaterThanOrEqual(-tolerance);
+  expect(state.shell.right).toBeLessThanOrEqual(
+    state.viewportWidth + tolerance
+  );
+  expect(state.shell.bottom).toBeLessThanOrEqual(
+    state.viewportHeight + tolerance
+  );
+
+  expect(state.inputFontSize).toBeGreaterThanOrEqual(16);
+});

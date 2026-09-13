@@ -123,6 +123,16 @@
   --control-icon-gap: 11px;
   --control-font-size: 13px;
   --control-font-weight: 700;
+  /*
+   * Central mobile environment policy.
+   * Components consume these tokens instead of using device-specific values.
+   */
+  --overlay-viewport-height: 100vh;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --mobile-form-control-font-size: 16px;
 
   /* Стыкуемые карточки и медиа не создают серых полос между поверхностями.
      Карточки сохраняют светлую поверхность и тонкую техническую рамку. */
@@ -1053,5 +1063,23 @@ a[href^="mailto:"] {
 
   .c-button--wide-mobile {
     width: 100%;
+  }
+}
+
+@supports (height: 100svh) {
+  :root {
+    --overlay-viewport-height: 100svh;
+  }
+}
+
+/* Central mobile form-control policy. */
+@media (max-width: 767px) {
+  input[data-type],
+  textarea[data-type],
+  select[data-type],
+  input:not([data-type]),
+  textarea:not([data-type]),
+  select:not([data-type]) {
+    font-size: var(--mobile-form-control-font-size);
   }
 }
