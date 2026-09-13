@@ -59,6 +59,15 @@ function Restore-Snapshot($Snapshot, [bool]$FrontendChanged, [bool]$BackendChang
         Set-BackendJunction $Snapshot.backend_path
         Start-Service -Name $ServiceName
     }
+    elseif ($BackendChanged) {
+        # The first backend release has no previous junction.  A failed first
+        # deployment must therefore remove the newly-created junction instead
+        # of accidentally leaving the failed runtime active.
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $BackendCurrent) {
+            cmd.exe /d /c "rmdir `"$BackendCurrent`"" | Out-Null
+        }
+    }
     if ($BackendChanged -and $Snapshot.backend_path) { Test-Backend }
     if ($FrontendChanged -and $Snapshot.frontend_path) { Test-Frontend }
 }

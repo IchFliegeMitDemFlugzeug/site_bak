@@ -13,4 +13,4 @@ Environment-файл staging хранится вне Git по пути `C:\Progr
 
 ## Production service
 
-WinSW binary не хранится в Git. Администратор кладёт проверенный `WinSW-x64.exe` вне репозитория и передаёт его путь в `scripts\production\migrate-two-component.ps1`. Миграция копирует binary и шаблон `config\BTS.ContactApi.xml` в `C:\ProgramData\BTS\contact-api`, регистрирует automatic service и проверяет `/api/health`.
+WinSW binary не хранится в Git. Постоянный `scripts\release-prod.ps1` получает фиксированный WinSW 2.12.0 из официального GitHub release, проверяет Authenticode, сохраняет staging cache и передаёт его вместе с `config\BTS.ContactApi.xml` скрипту `scripts\production\ensure-production.ps1`. До первого валидного backend служба остаётся Manual; после строгого local `/api/health` ensure переводит её в Automatic и только тогда включает публичное IIS proxy rule.

@@ -53,7 +53,7 @@ Production получает только тот `dist/`, который:
 
 Не вносить изменения только в `dist/` без соответствующих изменений исходников.
 
-До выполнения двухкомпонентной миграции production остаётся static-only. После миграции production использует постоянный Node.js runtime только для backend. Production не использует Git, GitHub Desktop, npm registry, `npm install`/`npm ci` при обычном deploy и не выполняет frontend/backend build: готовый backend приезжает со staging вместе с production-зависимостями.
+Production может начинать релиз в static-only состоянии. Постоянный `scripts/release-prod.ps1` сам проверяет и идемпотентно восстанавливает application-level инфраструктуру backend; отдельного ручного migration workflow нет. Production не использует Git, GitHub Desktop, npm registry, `npm install`/`npm ci` при обычном deploy и не выполняет frontend/backend build: готовый backend приезжает со staging вместе с production-зависимостями.
 
 ## 5. `dist/` должен быть production-safe
 
@@ -159,7 +159,7 @@ Production использует immutable release-папки:
 
 Обычный production-релиз запускается с немецкого staging-сервера.
 
-`-dryrun` обязан выполнять проверки и упаковку без отправки данных на production.
+`-dryrun` обязан выполнять проверки и только read-only SSH-опрос production: он ничего не загружает, не упаковывает для отправки, не пишет и не переключает на production.
 
 Живой релиз обязан использовать существующий механизм:
 
@@ -249,12 +249,12 @@ Rollback — обязательная часть схемы.
 
 Нельзя «исправлять» production только ради приведения его к тексту документации без проверки фактического рабочего состояния.
 
-## 18. Два независимых компонента после миграции
+## 18. Два независимых компонента и постоянный reconcile
 
 Frontend — готовый статический артефакт `dist/`; backend — самостоятельный артефакт `backend/`. Корневой `npm run build` собирает только frontend. Backend-зависимости принадлежат только `backend/package.json`; backend, `node_modules`, SMTP-конфигурация, WinSW и backend release-файлы запрещены в `dist/`.
 
 Версии компонентов определяются отдельно через Git tree hash `HEAD:dist` и `HEAD:backend`. Компонент со статусом `UNCHANGED` нельзя паковать, загружать, переключать, перезапускать или записывать в production state.
 
-После миграции backend хранится в immutable `C:\Sites\BTS\backend-releases\<release_id>`, активируется junction `C:\Sites\BTS\backend-current`, работает как WinSW-служба `BTSContactApi` и слушает только `127.0.0.1:3001`. Постоянный IIS `/api/*` proxy находится вне `dist`. Backend-секреты хранятся только во внешнем environment.
+Backend хранится в immutable `C:\Sites\BTS\backend-releases\<release_id>`, активируется junction `C:\Sites\BTS\backend-current`, работает как WinSW-служба `BTSContactApi` и слушает только `127.0.0.1:3001`. IIS `/api/*` proxy находится вне `dist` и включается только после строгого local backend health. Backend-секреты хранятся только во внешнем environment.
 
-Backend rollback обязателен; при релизе двух компонентов ошибка должна восстановить оба изменённых компонента. Однократную миграцию и её rollback нельзя запускать автоматически из обычной задачи разработки.
+Backend rollback обязателен; при релизе двух компонентов ошибка должна восстановить оба изменённых компонента. `scripts/production/ensure-production.ps1` — единственный постоянный способ проверки и восстановления application infrastructure; component rollback не откатывает выполненный им ремонт инфраструктуры.
