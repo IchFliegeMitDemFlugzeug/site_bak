@@ -671,6 +671,9 @@ summary:focus-visible {
 .contact-form__footer { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
 .contact-form__footer p { max-width: 340px; margin: 0; color: var(--muted); }
 .contact-form__status { min-height: 20px; margin: 14px 0 0; color: #4d738e; }
+.contact-form__status.is-error { color: #984444; }
+.contact-form__status.is-success { color: #356848; }
+.contact-form__honeypot { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* ========================================================================== */
 /* АДАПТИВ                                                                    */

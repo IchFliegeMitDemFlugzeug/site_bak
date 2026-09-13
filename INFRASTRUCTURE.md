@@ -10,6 +10,14 @@
 
 Этот документ описывает фактически настроенную и проверенную цепочку разработки, staging, production-релиза и rollback. Он предназначен для пользователя, ChatGPT, Codex, Sites и других агентов.
 
+## CURRENT STATE
+
+До ручного успешного запуска `scripts\production\migrate-two-component.ps1` production работает по описанной ниже проверенной static-only схеме. Все исторические сведения, пути, проверки и failure cases в разделах 1–30 относятся к этому фактическому состоянию.
+
+## TARGET STATE AFTER MIGRATION
+
+После отдельно согласованной миграции к существующему статическому frontend добавляются Node.js backend runtime, immutable backend releases, junction `backend-current`, WinSW-служба `BTSContactApi`, постоянный IIS `/api/*` proxy и selective deployment по tree hash. Подробное целевое состояние описано в разделе 31. До реального выполнения и проверки миграции оно не считается текущим production state.
+
 ---
 
 ## 1. Назначение и главный принцип
@@ -1120,3 +1128,52 @@ production switch logic     → C:\ProgramData\BTS\deploy\worker.ps1
 9. закоммитить документацию вместе с соответствующими versioned-изменениями.
 
 Этот документ должен оставаться описанием фактической, а не планируемой инфраструктуры.
+
+---
+
+## 31. Целевая двухкомпонентная схема после миграции
+
+### 31.1. Компоненты и production runtime
+
+Frontend остаётся готовым статическим `dist/`, собираемым только командой `npm run build`. Backend — самостоятельный `backend/` со своими `package.json` и полным npm lockfile. Backend никогда не попадает в `dist/`.
+
+На staging выполняется `npm ci --prefix backend --omit=dev`, после чего готовый backend runtime вместе с production `node_modules` упаковывается в ZIP. Production использует Node.js только как runtime backend-службы, не использует npm registry, не выполняет `npm install`/`npm ci` и ничего не собирает.
+
+### 31.2. Backend storage, WinSW и IIS
+
+```text
+C:\Sites\BTS\backend-releases\<release_id>\
+C:\Sites\BTS\backend-current
+C:\ProgramData\BTS\contact-api\BTSContactApi.exe
+C:\ProgramData\BTS\contact-api\BTSContactApi.xml
+```
+
+`backend-current` — стабильный NTFS junction на immutable release. WinSW binary хранится вне Git; automatic service `BTSContactApi` запускает `C:\Sites\BTS\backend-current\server.js`. Backend слушает только `127.0.0.1:3001`.
+
+IIS URL Rewrite + ARR хранит постоянное site-level правило вне `dist`: `/api/*` → `http://127.0.0.1:3001/api/*`. ARR добавляет фактический client IP в `X-Forwarded-For`; Express доверяет эту цепочку только когда непосредственный peer — loopback IIS. Bindings, HTTPS и certificates не меняются.
+
+### 31.3. Версии, selective deploy и state
+
+Локальные версии — `git rev-parse HEAD:dist` и `git rev-parse HEAD:backend`. Production хранит marker `deployment-schema-version.txt` со значением `2`, а также `current-frontend-tree.txt`, `current-frontend-commit.txt`, `current-backend-tree.txt`, `current-backend-commit.txt`, `current-backend-release.txt`. Старые `current-release.txt` и `current-commit.txt` сохраняют значение frontend path/commit. Пока marker отсутствует или отличается от `2`, новый release-клиент немедленно останавливается до preflight, упаковки и любых production-изменений.
+
+Компонент с совпавшим tree получает настоящий `SKIP`: без `npm ci`, упаковки, upload, новой release-папки, switch/restart и state update. Если оба совпали, release завершает `PASS: nothing changed`. Для точного плана `-DryRun` читает production state через SSH, поэтому также требует доступного SSH и выключенного AmneziaVPN на Selectel.
+
+При первом запуске без `current-frontend-tree.txt` клиент использует старый `current-commit.txt` и локально вычисляет `<commit>:dist`. Если commit нельзя безопасно разрешить, frontend считается изменившимся.
+
+### 31.4. Release protocol и rollback
+
+Для изменившихся компонентов manifest содержит release id, commit, tree, archive и SHA-256. Все архивы загружаются первыми, request JSON — последним. Worker проверяет hashes, разворачивает backend первым, проверяет `GET http://127.0.0.1:3001/api/health` → `{"ok":true}`, затем переключает и проверяет frontend прежними sitemap/404 checks.
+
+Ошибка backend-only откатывает backend; frontend-only — frontend. При совместном release любой внутренний или внешний failure восстанавливает оба изменённых компонента и проверяет восстановленное состояние. Перед внешним rollback worker проверяет, что active paths всё ещё принадлежат этому release.
+
+### 31.5. Staging backend
+
+Frontend staging остаётся `<repo>\dist` сайта `BTS-STAGE`. `scripts\configure-staging-iis.ps1` один раз добавляет только staging site-level `/api/*` proxy после IIS backup. `scripts\setup-staging-backend.ps1` запускает backend с отдельным `C:\ProgramData\BTS\staging-contact-api.env`; production secrets не используются, порт 3001 наружу не открывается, `POTOK_WebApp` не затрагивается.
+
+### 31.6. Однократная migration и её rollback
+
+Administrator вручную запускает `scripts\production\migrate-two-component.ps1` с готовым backend ZIP и внешним WinSW. До любых изменений script проверяет Administrator, Node.js, IIS, URL Rewrite, ARR, WinSW input, backend ZIP и все непустые `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `CONTACT_TO`; порт обязан быть числом 1–65535. Затем создаются IIS backup, backup worker/state и migration metadata, не меняющие active frontend.
+
+Только после backup создаются backend storage/junction/service, постоянный API proxy и worker v2; затем выполняется backend health. `scripts\production\rollback-migration.ps1` восстанавливает IIS backup, worker, state, прежний junction и прежнее состояние службы. Frontend releases, baseline `20260911-193310_legacy-prod` и legacy production не удаляются.
+
+SMTP values находятся только в machine environment production. Пароли не входят в Git, ZIP или frontend. После фактической миграции и проверки заголовок CURRENT STATE должен быть обновлён отдельным осознанным изменением документации.

@@ -1,0 +1,16 @@
+<service>
+  <id>BTSContactApi</id>
+  <name>BTS Contact API</name>
+  <description>Локальный backend формы обратной связи сайта btsys.ru.</description>
+  <executable>C:\Program Files\nodejs\node.exe</executable>
+  <arguments>C:\Sites\BTS\backend-current\server.js</arguments>
+  <workingdirectory>C:\Sites\BTS\backend-current</workingdirectory>
+  <startmode>Automatic</startmode>
+  <stoptimeout>15sec</stoptimeout>
+  <onfailure action="restart" delay="10 sec" />
+  <logpath>C:\ProgramData\BTS\contact-api\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10485760</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

@@ -1,7 +1,8 @@
 param(
     # This switch is used only while the release tooling itself is being installed.
     # Normal releases must never use it.
-    [switch]$SkipGitClean
+    [switch]$SkipGitClean,
+    [switch]$BackendChanged
 )
 
 # Any unexpected PowerShell error must stop the validation process.
@@ -12,6 +13,7 @@ $Repo = Split-Path -Parent $PSScriptRoot
 
 # The exact folder served by staging and later transferred to production.
 $Dist = Join-Path $Repo 'dist'
+$Backend = Join-Path $Repo 'backend'
 
 # Reload the current registered Windows PATH values.
 # This makes the script independent of an Explorer process with stale environment data.
@@ -105,6 +107,43 @@ if ($Git) {
 # ---------------------------------------------------------------------------
 
 Assert-Check (Test-Path $Dist) 'dist directory exists'
+Assert-Check (Test-Path $Backend) 'backend directory exists'
+
+# Backend is a separate deployable component and must never be copied into dist.
+foreach ($BackendFile in @('server.js','package.json','package-lock.json')) {
+    Assert-Check (Test-Path (Join-Path $Backend $BackendFile)) "Backend file exists: $BackendFile"
+}
+$BackendPackage = if (Test-Path (Join-Path $Backend 'package.json')) { Get-Content (Join-Path $Backend 'package.json') -Raw | ConvertFrom-Json } else { $null }
+$BackendLock = if (Test-Path (Join-Path $Backend 'package-lock.json')) { Get-Content (Join-Path $Backend 'package-lock.json') -Raw | ConvertFrom-Json } else { $null }
+if ($BackendPackage -and $BackendLock) {
+    $PackageDependencies = @($BackendPackage.dependencies.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object)
+    $LockRoot = $BackendLock.packages.PSObject.Properties[''].Value
+    $LockDependencies = @($LockRoot.dependencies.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object)
+    Assert-Check (($PackageDependencies -join '|') -eq ($LockDependencies -join '|')) 'backend package.json and lockfile root dependencies agree'
+}
+Assert-Check (-not (Test-Path (Join-Path $Dist 'backend'))) 'backend is absent from dist'
+Assert-Check (-not (Test-Path (Join-Path $Dist 'node_modules'))) 'node_modules is absent from dist'
+
+$BackendServer = if (Test-Path (Join-Path $Backend 'server.js')) { Get-Content (Join-Path $Backend 'server.js') -Raw } else { '' }
+Assert-Check ($BackendServer -match "app\.get\('/api/health'") 'backend health endpoint exists'
+Assert-Check ($BackendServer -match "app\.post\('/api/contact'") 'backend contact endpoint exists'
+Assert-Check ($BackendServer -match "app\.set\('trust proxy'") 'backend trust proxy is configured'
+$CommittedSecretPattern = '(?im)^\s*(SMTP_PASS|PASSWORD|TOKEN|API_KEY)\s*=\s*\S+'
+$BackendTextFiles = @(Get-ChildItem $Backend -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\node_modules\\' -and $_.Extension -in @('.js','.json','.xml','.txt','.example') })
+$BackendSecretMatches = @($BackendTextFiles | Select-String -Pattern $CommittedSecretPattern -ErrorAction SilentlyContinue)
+Assert-Check ($BackendSecretMatches.Count -eq 0) 'backend source contains no committed credential values'
+
+if ($NpmCommand -and $BackendChanged) {
+    Write-Host '=== BACKEND PREFLIGHT ==='
+    & $NpmCommand.Source ci --prefix $Backend --omit=dev
+    if ($LASTEXITCODE -eq 0) { Add-Pass 'backend package-lock is installable' } else { Add-Fail "backend npm ci failed: $LASTEXITCODE" }
+    & node.exe --check (Join-Path $Backend 'server.js')
+    if ($LASTEXITCODE -eq 0) { Add-Pass 'backend JavaScript syntax is valid' } else { Add-Fail 'backend JavaScript syntax is invalid' }
+    & $NpmCommand.Source test --prefix $Backend
+    if ($LASTEXITCODE -eq 0) { Add-Pass 'backend tests passed' } else { Add-Fail "backend tests failed: $LASTEXITCODE" }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'scripts\test-backend-packaging.ps1')
+    if ($LASTEXITCODE -eq 0) { Add-Pass 'backend recursive packaging test passed' } else { Add-Fail "backend packaging test failed: $LASTEXITCODE" }
+}
 
 # These files are mandatory for every production release.
 $RequiredFiles = @(

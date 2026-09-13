@@ -54,7 +54,7 @@ if (footerMount) {
           <a href="/faq/">Вопросы</a>
           <a href="/about/">О нас</a>
         </nav>
-        <a href="mailto:info@btsystems.ru">info@btsystems.ru</a>
+        <a href="mailto:info@btsys.ru">info@btsys.ru</a>
       </div>
     </footer>
   `;
@@ -77,38 +77,29 @@ if (overlaysMount) {
           <div class="contact-form__grid">
             <label class="contact-field">
               <span>Имя <strong aria-hidden="true">*</strong></span>
-              <input type="text" name="name" autocomplete="name" required placeholder="Как к вам обращаться">
+              <input type="text" name="name" autocomplete="name" required maxlength="100" placeholder="Как к вам обращаться">
             </label>
 
             <label class="contact-field">
               <span>Компания</span>
-              <input type="text" name="company" autocomplete="organization" placeholder="Название организации">
+              <input type="text" name="company" autocomplete="organization" maxlength="150" placeholder="Название организации">
             </label>
 
-            <fieldset class="contact-methods" data-contact-methods>
-              <legend>Как с вами связаться <strong aria-hidden="true">*</strong></legend>
-              <div class="contact-methods__grid">
-                <label class="contact-field">
-                  <span>Почта</span>
-                  <input type="email" name="email" autocomplete="email" inputmode="email" placeholder="name@company.ru" data-contact-email>
-                </label>
-                <label class="contact-field">
-                  <span>Телефон</span>
-                  <input type="tel" name="phone" autocomplete="tel" inputmode="tel" placeholder="+7 900 000-00-00" data-contact-phone>
-                </label>
-              </div>
-              <p class="contact-methods__hint">Укажите почту или номер телефона — достаточно одного способа связи.</p>
-            </fieldset>
+            <label class="contact-field">
+              <span>Электронная почта <strong aria-hidden="true">*</strong></span>
+              <input type="email" name="email" autocomplete="email" inputmode="email" required maxlength="254" placeholder="name@company.ru" data-contact-email>
+            </label>
 
             <label class="contact-field contact-field--wide">
-              <span>Задача и исходные данные</span>
-              <textarea name="request" rows="5" placeholder="Тип БВС, силовая установка, примерный объём топлива и место установки бака"></textarea>
+              <span>Сообщение <strong aria-hidden="true">*</strong></span>
+              <textarea name="message" rows="5" required maxlength="5000" placeholder="Тип БВС, силовая установка, примерный объём топлива и место установки бака"></textarea>
             </label>
+            <label class="contact-form__honeypot" aria-hidden="true">Не заполняйте это поле<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
           </div>
 
           <div class="contact-form__footer">
-            <p>После отправки откроется подготовленное письмо на адрес info@btsystems.ru. Данные не сохраняются на сайте.</p>
-            <button class="primary-button" type="submit">Отправить запрос <span aria-hidden="true">↗</span></button>
+            <p>Заявка будет отправлена на <a href="mailto:info@btsys.ru">info@btsys.ru</a>.</p>
+            <button class="primary-button" type="submit" data-contact-submit>Отправить запрос <span aria-hidden="true">↗</span></button>
           </div>
           <p class="contact-form__status" data-contact-status aria-live="polite"></p>
         </form>
@@ -367,10 +358,8 @@ const contactDialog = document.querySelector('[data-contact-dialog]');
 const contactOpeners = [...document.querySelectorAll('[data-contact-open]')];
 const contactCloser = document.querySelector('[data-contact-close]');
 const contactForm = document.querySelector('[data-contact-form]');
-const contactEmail = document.querySelector('[data-contact-email]');
-const contactPhone = document.querySelector('[data-contact-phone]');
-const contactMethods = document.querySelector('[data-contact-methods]');
 const contactStatus = document.querySelector('[data-contact-status]');
+const contactSubmit = document.querySelector('[data-contact-submit]');
 let contactCloseTimer = 0;
 
 // Панель въезжает справа после перехода dialog в модальный режим.
@@ -407,24 +396,9 @@ contactDialog?.addEventListener('click', event => {
   if (event.target === contactDialog) closeContactDialog();
 });
 
-// Пользователь обязан оставить хотя бы один способ связи: почту или телефон.
-function validateContactMethod() {
-  const hasEmail = Boolean(contactEmail?.value.trim());
-  const hasPhone = Boolean(contactPhone?.value.trim());
-  const isMissing = !hasEmail && !hasPhone;
-
-  contactEmail?.setCustomValidity(isMissing ? 'Укажите почту или номер телефона.' : '');
-  contactMethods?.classList.toggle('has-error', isMissing);
-  return !isMissing;
-}
-
-contactEmail?.addEventListener('input', validateContactMethod);
-contactPhone?.addEventListener('input', validateContactMethod);
-
-// После проверки формируем понятное структурированное письмо в почтовом приложении посетителя.
-contactForm?.addEventListener('submit', event => {
+// После нативной проверки отправляем данные в API сайта, не передавая SMTP-реквизиты браузеру.
+contactForm?.addEventListener('submit', async event => {
   event.preventDefault();
-  validateContactMethod();
 
   if (!contactForm.checkValidity()) {
     contactForm.reportValidity();
@@ -435,21 +409,38 @@ contactForm?.addEventListener('submit', event => {
   const name = String(formData.get('name') || '').trim();
   const company = String(formData.get('company') || '').trim();
   const email = String(formData.get('email') || '').trim();
-  const phone = String(formData.get('phone') || '').trim();
-  const request = String(formData.get('request') || '').trim();
-  const subject = company ? `Запрос с сайта БТС — ${company}` : `Запрос с сайта БТС — ${name}`;
-  const body = [
-    `Имя: ${name}`,
-    `Компания: ${company || 'не указана'}`,
-    `Почта: ${email || 'не указана'}`,
-    `Телефон: ${phone || 'не указан'}`,
-    '',
-    'Задача и исходные данные:',
-    request || 'не указаны',
-  ].join('\n');
+  const message = String(formData.get('message') || '').trim();
+  const website = String(formData.get('website') || '');
 
-  if (contactStatus) contactStatus.textContent = 'Открываем подготовленное письмо…';
-  window.location.href = `mailto:info@btsystems.ru?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  if (contactSubmit) contactSubmit.disabled = true;
+  if (contactSubmit) contactSubmit.firstChild.textContent = 'Отправляем… ';
+  if (contactStatus) contactStatus.replaceChildren();
+  contactStatus?.classList.remove('is-error', 'is-success');
+
+  try {
+    const response = await fetch('/api/contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, company, message, website }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || result?.ok !== true) throw new Error('contact_api_failed');
+    contactForm.reset();
+    if (contactStatus) contactStatus.textContent = 'Заявка отправлена. Мы свяжемся с вами по указанной электронной почте.';
+    contactStatus?.classList.add('is-success');
+  } catch {
+    if (contactStatus) {
+      contactStatus.append('Не удалось отправить заявку. Попробуйте ещё раз или напишите нам на ');
+      const emailLink = document.createElement('a');
+      emailLink.href = 'mailto:info@btsys.ru';
+      emailLink.textContent = 'info@btsys.ru';
+      contactStatus.append(emailLink, '.');
+    }
+    contactStatus?.classList.add('is-error');
+  } finally {
+    if (contactSubmit) contactSubmit.disabled = false;
+    if (contactSubmit) contactSubmit.firstChild.textContent = 'Отправить запрос ';
+  }
 });
 
 /* ========================================================================== */

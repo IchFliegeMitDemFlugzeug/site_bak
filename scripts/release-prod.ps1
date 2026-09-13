@@ -6,7 +6,9 @@ $erroractionpreference = 'stop'
 
 $repo = split-path -parent $psscriptroot
 $dist = join-path $repo 'dist'
+$backend = join-path $repo 'backend'
 $preflight = join-path $repo 'scripts\preflight.ps1'
+$backendpackaging = join-path $repo 'scripts\backend-package.ps1'
 $outroot = join-path $repo '.release'
 
 $sshkey = 'c:\programdata\bts\ssh\bts_prod_ed25519'
@@ -143,6 +145,10 @@ function test-external-production {
     }
 
     write-host "pass: production 404 -> 404"
+
+    $backendhealth = get-http-result 'https://btsys.ru/api/health'
+    if ($backendhealth.status -ne 200) { throw "external backend health failed: $($backendhealth.status)" }
+    write-host 'pass: production backend health -> 200'
 }
 
 write-host '=== release precheck ==='
@@ -198,6 +204,68 @@ if ($head -ne $remotehead) {
 
 write-host 'github state: pass'
 
+# Exact DEPLOY/SKIP requires the production component state. DryRun performs this
+# read-only SSH query too, so Selectel VPN must be disabled for a precise plan.
+if (-not (test-path $sshkey)) {
+    throw "ssh private key not found: $sshkey"
+}
+
+$sshargs = @(
+    '-i', $sshkey,
+    '-o', 'batchmode=yes',
+    '-o', 'connecttimeout=10'
+)
+
+& ssh.exe @sshargs $remote 'cmd.exe /d /c exit 0'
+
+if ($lastexitcode -ne 0) {
+    throw 'production ssh is unavailable. DryRun and live release require it for component state; disable AmneziaVPN on Selectel'
+}
+
+$statecommand = "powershell.exe -noprofile -command `"`$s='C:\ProgramData\BTS\deploy\state';[pscustomobject]@{schema_version=if(test-path (`$s+'\deployment-schema-version.txt')){(gc (`$s+'\deployment-schema-version.txt') -raw).trim()}else{''};frontend_tree=if(test-path (`$s+'\current-frontend-tree.txt')){(gc (`$s+'\current-frontend-tree.txt') -raw).trim()}else{''};frontend_commit=if(test-path (`$s+'\current-commit.txt')){(gc (`$s+'\current-commit.txt') -raw).trim()}else{''};backend_tree=if(test-path (`$s+'\current-backend-tree.txt')){(gc (`$s+'\current-backend-tree.txt') -raw).trim()}else{''}}|convertto-json -compress`""
+$productionstatejson = @(& ssh.exe @sshargs $remote $statecommand)
+
+if ($lastexitcode -ne 0 -or $productionstatejson.count -eq 0) {
+    throw 'production component state could not be read'
+}
+
+$productionstate = ($productionstatejson -join "`n") | convertfrom-json
+
+# Selective manifests are understood only by worker v2. This guard runs before
+# hashes, preflight, packaging or uploads, so an unmigrated production is untouched.
+if ([string]$productionstate.schema_version -ne '2') {
+    throw 'Production two-component migration is required before release.'
+}
+
+$frontendtree = (& $git rev-parse 'HEAD:dist').trim()
+$backendtree = (& $git rev-parse 'HEAD:backend').trim()
+$productionfrontendtree = [string]$productionstate.frontend_tree
+
+if (-not $productionfrontendtree -and [string]$productionstate.frontend_commit -match '^[0-9a-f]{40}$') {
+    $legacytree = @(& $git rev-parse "$($productionstate.frontend_commit):dist" 2>$null)
+    if ($lastexitcode -eq 0 -and $legacytree.count -gt 0) {
+        $productionfrontendtree = ($legacytree -join '').trim()
+    }
+}
+
+$productionbackendtree = [string]$productionstate.backend_tree
+$frontendchanged = $frontendtree -ne $productionfrontendtree
+$backendchanged = $backendtree -ne $productionbackendtree
+
+write-host ''
+write-host '=== component state ==='
+write-host "FRONTEND local:      $frontendtree"
+write-host "FRONTEND production: $productionfrontendtree"
+write-host "FRONTEND action:     $(if ($frontendchanged) { 'DEPLOY' } else { 'SKIP' })"
+write-host "BACKEND local:       $backendtree"
+write-host "BACKEND production:  $productionbackendtree"
+write-host "BACKEND action:      $(if ($backendchanged) { 'DEPLOY' } else { 'SKIP' })"
+
+if (-not $frontendchanged -and -not $backendchanged) {
+    write-host 'PASS: nothing changed'
+    return
+}
+
 write-host ''
 write-host '=== existing project preflight ==='
 
@@ -206,7 +274,8 @@ $powershell = "$env:windir\system32\windowspowershell\v1.0\powershell.exe"
 & $powershell `
     -noprofile `
     -executionpolicy bypass `
-    -file $preflight
+    -file $preflight `
+    -BackendChanged:$backendchanged
 
 if ($lastexitcode -ne 0) {
     throw "project preflight failed: $lastexitcode"
@@ -244,60 +313,64 @@ if ($head -ne $finalremotehead) {
 write-host 'final git state: pass'
 
 write-host ''
-write-host '=== package exact inspected dist ==='
+write-host '=== package changed components ==='
 
 $shortsha = $head.substring(0, 12)
 $stamp = get-date -format 'yyyyMMdd-HHmmss'
 $releaseid = "${stamp}_${shortsha}"
-
 $outdir = join-path $outroot $releaseid
-$archive = join-path $outdir "$releaseid.zip"
 $request = join-path $outdir "$releaseid.request.json"
 $rollbackrequest = join-path $outdir "$releaseid.rollback.json"
-
 new-item -itemtype directory -path $outdir -force | out-null
-
 add-type -assemblyname system.io.compression.filesystem
 
-[io.compression.zipfile]::createfromdirectory(
-    $dist,
-    $archive,
-    [io.compression.compressionlevel]::optimal,
-    $false
-)
+$components = [ordered]@{}
+$frontendarchive = $null
+$backendarchive = $null
 
-$hash = (
-    get-filehash -literalpath $archive -algorithm sha256
-).hash.tolowerinvariant()
-
-$files = @(
-    get-childitem -literalpath $dist -file -recurse
-)
-
-$bytes = (
-    $files |
-    measure-object -property length -sum
-).sum
-
-$manifest = [pscustomobject]@{
-    release_id = $releaseid
-    commit = $head
-    archive = [io.path]::getfilename($archive)
-    sha256 = $hash
+if ($frontendchanged) {
+    $frontendarchive = join-path $outdir "$releaseid.frontend.zip"
+    [io.compression.zipfile]::createfromdirectory($dist,$frontendarchive,[io.compression.compressionlevel]::optimal,$false)
+    $components.frontend = [ordered]@{
+        changed = $true
+        tree = $frontendtree
+        archive = [io.path]::getfilename($frontendarchive)
+        sha256 = (get-filehash $frontendarchive -algorithm sha256).hash.tolowerinvariant()
+    }
+    write-host "FRONTEND archive: $frontendarchive"
+}
+else {
+    $components.frontend = [ordered]@{ changed=$false; tree=$frontendtree; archive=''; sha256='' }
+    write-host 'FRONTEND packaging: SKIPPED'
 }
 
-[io.file]::writealltext(
-    $request,
-    ($manifest | convertto-json),
-    (new-object text.utf8encoding($false))
-)
+if ($backendchanged) {
+    . $backendpackaging
+    $backendarchive = join-path $outdir "$releaseid.backend.zip"
+    New-BackendArtifact -BackendSource $backend -WorkingDirectory (join-path $outdir 'backend-runtime') -ArchivePath $backendarchive -SkipInstall | out-null
+    $components.backend = [ordered]@{
+        changed = $true
+        tree = $backendtree
+        archive = [io.path]::getfilename($backendarchive)
+        sha256 = (get-filehash $backendarchive -algorithm sha256).hash.tolowerinvariant()
+    }
+    write-host "BACKEND archive: $backendarchive"
+}
+else {
+    $components.backend = [ordered]@{ changed=$false; tree=$backendtree; archive=''; sha256='' }
+    write-host 'BACKEND packaging: SKIPPED'
+}
 
+$manifest = [ordered]@{
+    release_id = $releaseid
+    commit = $head
+    components = $components
+}
+
+[io.file]::writealltext($request,($manifest | convertto-json -depth 6),(new-object text.utf8encoding($false)))
 write-host "release id: $releaseid"
 write-host "commit:     $head"
-write-host "files:      $($files.count)"
-write-host "dist bytes: $bytes"
-write-host "archive:    $archive"
-write-host "sha256:     $hash"
+write-host "request:    $request"
 
 if ($dryrun) {
     write-host ''
@@ -338,26 +411,25 @@ $scpargs = @(
     '-o', 'connecttimeout=10'
 )
 
-$remotearchive = "${remote}:C:/ProgramData/BTS/deploy/incoming/$([io.path]::getfilename($archive))"
+# Every changed component archive is uploaded first. An unchanged component
+# has no archive and therefore causes no production-side activity.
+foreach ($componentname in @('backend','frontend')) {
+    $component = $components[$componentname]
+    if (-not $component.changed) {
+        write-host "$($componentname.toupper()) upload: SKIPPED"
+        continue
+    }
+    $localarchive = join-path $outdir $component.archive
+    $remotearchive = "${remote}:C:/ProgramData/BTS/deploy/incoming/$($component.archive)"
+    & scp.exe @scpargs $localarchive $remotearchive
+    if ($lastexitcode -ne 0) { throw "$componentname archive upload failed: $lastexitcode" }
+    write-host "$($componentname.toupper()) archive upload: pass"
+}
+
 $remoterequest = "${remote}:C:/ProgramData/BTS/deploy/incoming/$([io.path]::getfilename($request))"
-
-# Upload the large immutable archive first.
-& scp.exe @scpargs $archive $remotearchive
-
-if ($lastexitcode -ne 0) {
-    throw "archive upload failed: $lastexitcode"
-}
-
-write-host 'archive upload: pass'
-
-# Upload the request last. Its appearance tells the production worker
-# that the archive is complete and may be processed.
+# Request is deliberately last, so the worker cannot observe partial artifacts.
 & scp.exe @scpargs $request $remoterequest
-
-if ($lastexitcode -ne 0) {
-    throw "request upload failed: $lastexitcode"
-}
-
+if ($lastexitcode -ne 0) { throw "request upload failed: $lastexitcode" }
 write-host 'request upload: pass'
 
 write-host ''
@@ -423,6 +495,7 @@ if (-not $externalok) {
 
     $rollback = [pscustomobject]@{
         release_id = $releaseid
+        components = [pscustomobject]@{ frontend = $frontendchanged; backend = $backendchanged }
     }
 
     [io.file]::writealltext(
