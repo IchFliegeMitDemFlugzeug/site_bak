@@ -108,6 +108,14 @@ test('external checks retry three times with five-second pauses before rollback'
   assert.match(release, /if \(\$attempt -lt 3\)/);
 });
 
+test('backend-current junction grants LocalService read-execute on the link itself', () => {
+  assert.match(
+    worker,
+    /function Set-BackendJunction[\s\S]*?mklink \/J[\s\S]*?icacls\.exe \$BackendCurrent \/grant:r '\*S-1-5-19:RX' \/L/
+  );
+  assert.match(worker, /backend-current junction ACL failed/);
+});
+
 test('first-backend rollback removes a failed junction without reverting infrastructure', () => {
   assert.match(worker, /elseif \(\$BackendChanged\)[\s\S]*?Stop-Service[\s\S]*?rmdir/);
   assert.doesNotMatch(worker, /rollback[\s\S]*ensure-production\.ps1/i);

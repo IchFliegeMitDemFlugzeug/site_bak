@@ -118,6 +118,11 @@ function Set-BackendJunction([string]$Target) {
     if (Test-Path -LiteralPath $BackendCurrent) { cmd.exe /d /c "rmdir `"$BackendCurrent`"" | Out-Null }
     cmd.exe /d /c "mklink /J `"$BackendCurrent`" `"$Target`"" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'backend-current junction switch failed' }
+
+    # LocalService runs the backend through backend-current.  The release
+    # target already has RX; grant RX on the junction itself as well.
+    & icacls.exe $BackendCurrent /grant:r '*S-1-5-19:RX' /L | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'backend-current junction ACL failed' }
 }
 
 function Restore-Snapshot($Snapshot, [bool]$FrontendChanged, [bool]$BackendChanged) {
