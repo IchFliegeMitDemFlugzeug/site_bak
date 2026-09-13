@@ -635,8 +635,12 @@ summary:focus-visible {
 /* ========================================================================== */
 /* ВЫЕЗЖАЮЩАЯ ФОРМА ОБРАТНОЙ СВЯЗИ                                           */
 /* ========================================================================== */
-.contact-dialog { display: none; justify-content: flex-end; }
-.contact-dialog[open] { display: flex; }
+/*
+ * The dialog itself is now the right-side panel.
+ * Block flow prevents the shell from shrinking below its content.
+ */
+.contact-dialog { display: none; }
+.contact-dialog[open] { display: block; }
 .contact-dialog__shell {
   position: relative;
   width: 100%;

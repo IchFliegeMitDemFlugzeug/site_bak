@@ -298,10 +298,12 @@ test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) =
   const readState = () => page.evaluate(() => {
     const dialogElement = document.querySelector('[data-contact-dialog]');
     const shellElement = document.querySelector('.contact-dialog__shell');
+    const formElement = document.querySelector('.contact-form');
     const inputElement = document.querySelector('.contact-dialog input');
 
     const dialogRect = dialogElement.getBoundingClientRect();
     const shellRect = shellElement.getBoundingClientRect();
+    const formRect = formElement.getBoundingClientRect();
     const dialogStyle = getComputedStyle(dialogElement);
     const shellStyle = getComputedStyle(shellElement);
 
@@ -320,6 +322,12 @@ test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) =
         left: shellRect.left,
         top: shellRect.top,
         right: shellRect.right,
+        bottom: shellRect.bottom,
+      },
+
+      form: {
+        top: formRect.top,
+        bottom: formRect.bottom,
       },
 
       rootOverflow: getComputedStyle(document.documentElement).overflow,
@@ -348,6 +356,14 @@ test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) =
   );
   expect(beforeFocus.shell.right).toBeLessThanOrEqual(
     beforeFocus.dialog.right + tolerance
+  );
+
+  // The complete form must remain inside the painted shell background.
+  expect(beforeFocus.form.top).toBeGreaterThanOrEqual(
+    beforeFocus.shell.top - tolerance
+  );
+  expect(beforeFocus.form.bottom).toBeLessThanOrEqual(
+    beforeFocus.shell.bottom + tolerance
   );
 
   // Native modal geometry must not depend on a custom root scroll lock.
