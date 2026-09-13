@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# These production trusted assets are compared byte-for-byte by SHA-256.
+# Keep their working-tree representation identical on every platform.
+scripts/production/worker-v2.ps1 text eol=lf
+scripts/production/ensure-production.ps1 text eol=lf
+backend/config/BTS.ContactApi.xml text eol=lf

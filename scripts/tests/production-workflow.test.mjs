@@ -8,6 +8,7 @@ const ensure = read('scripts/production/ensure-production.ps1');
 const worker = read('scripts/production/worker-v2.ps1');
 const bootstrap = read('scripts/production/bootstrap-worker-v2.ps1');
 const serviceXml = read('backend/config/BTS.ContactApi.xml');
+const attributes = read('.gitattributes');
 
 test('release never invokes ensure directly over SSH', () => {
   assert.doesNotMatch(release, /powershell\.exe[^\n]+ensure-production\.ps1/i);
@@ -110,4 +111,13 @@ test('external checks retry three times with five-second pauses before rollback'
 test('first-backend rollback removes a failed junction without reverting infrastructure', () => {
   assert.match(worker, /elseif \(\$BackendChanged\)[\s\S]*?Stop-Service[\s\S]*?rmdir/);
   assert.doesNotMatch(worker, /rollback[\s\S]*ensure-production\.ps1/i);
+});
+test('trusted assets use canonical LF and bootstrap pins exact WinSW bytes', () => {
+  assert.match(attributes, /^scripts\/production\/worker-v2\.ps1 text eol=lf$/m);
+  assert.match(attributes, /^scripts\/production\/ensure-production\.ps1 text eol=lf$/m);
+  assert.match(attributes, /^backend\/config\/BTS\.ContactApi\.xml text eol=lf$/m);
+  assert.match(bootstrap, /\$expectedWinSWSha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'/);
+  assert.match(bootstrap, /\$expectedWinSWSize = 18243033/);
+  assert.match(bootstrap, /Get-FileHash -LiteralPath \$WinSWSource -Algorithm SHA256/);
+  assert.doesNotMatch(bootstrap, /Get-AuthenticodeSignature/);
 });

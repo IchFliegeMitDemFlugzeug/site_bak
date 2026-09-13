@@ -33,8 +33,18 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 foreach ($source in @($WorkerSource,$EnsureSource,$ServiceConfigSource,$WinSWSource)) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Bootstrap source is missing: $source" }
 }
-$winSWSignature = Get-AuthenticodeSignature -FilePath $WinSWSource
-if ($winSWSignature.Status -ne 'Valid') { throw "WinSW Authenticode signature is not valid: $($winSWSignature.Status)" }
+# WinSW v2.12.0 x64 is not Authenticode-signed. Pin the exact official
+# GitHub release asset instead of accepting an arbitrary executable.
+$expectedWinSWSha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
+$expectedWinSWSize = 18243033
+$actualWinSWSha256 = (Get-FileHash -LiteralPath $WinSWSource -Algorithm SHA256).Hash.ToUpperInvariant()
+$actualWinSWSize = (Get-Item -LiteralPath $WinSWSource).Length
+if ($actualWinSWSha256 -ne $expectedWinSWSha256) {
+    throw "Unexpected WinSW SHA256: $actualWinSWSha256"
+}
+if ($actualWinSWSize -ne $expectedWinSWSize) {
+    throw "Unexpected WinSW size: $actualWinSWSize"
+}
 [xml]$serviceConfig = Get-Content -LiteralPath $ServiceConfigSource -Raw
 if ($serviceConfig.service.id -ne 'BTSContactApi') { throw 'Unexpected WinSW service configuration.' }
 $task = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop
