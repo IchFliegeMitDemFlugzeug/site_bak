@@ -1,10 +1,25 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import nodemailer from 'nodemailer';
+import { pathToFileURL } from 'node:url';
 
 const HOST = '127.0.0.1';
 const PORT = 3001;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeClientIp(value) {
+  if (typeof value !== 'string') return '';
+
+  const ip = value.trim();
+
+  const ipv4WithPort = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+  if (ipv4WithPort) return ipv4WithPort[1];
+
+  const bracketedIpv6WithPort = ip.match(/^\[([0-9a-fA-F:]+)\]:\d+$/);
+  if (bracketedIpv6WithPort) return bracketedIpv6WithPort[1];
+
+  return ip;
+}
 
 export function createContactApp({ transport } = {}) {
   const app = express();
@@ -24,6 +39,7 @@ export function createContactApp({ transport } = {}) {
     auth: { user: smtpUser, pass: smtpPass },
   });
   const limiter = rateLimit({
+    keyGenerator: request => ipKeyGenerator(normalizeClientIp(request.ip || request.socket.remoteAddress || '127.0.0.1')),
     windowMs: 15 * 60 * 1000,
     limit: 5,
     standardHeaders: true,
@@ -78,6 +94,6 @@ export function createContactApp({ transport } = {}) {
   return app;
 }
 
-if (process.argv[1] && import.meta.url === new URL(process.argv[1], 'file:').href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   createContactApp().listen(PORT, HOST, () => console.log(`Contact API is listening on http://${HOST}:${PORT}`));
 }

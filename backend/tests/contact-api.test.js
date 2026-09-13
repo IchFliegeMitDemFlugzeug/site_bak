@@ -75,6 +75,17 @@ test('sixth request from one forwarded client is rate limited', async () => {
   assert.deepEqual(await response.json(), { ok: false, error: 'rate_limit' });
 });
 
+test('forwarded IPv4 with source port is normalized for rate limiting', async () => {
+  const base = await start();
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    assert.equal((await post(base, valid, '142.132.205.110:10214')).status, 200);
+  }
+
+  const response = await post(base, valid, '142.132.205.110:10214');
+  assert.equal(response.status, 429);
+  assert.deepEqual(await response.json(), { ok: false, error: 'rate_limit' });
+});
 test('SMTP failure returns only the stable server response', async () => {
   const base = await start({ sendMail: async () => { throw new Error('private SMTP detail'); } });
   const response = await post(base, valid);

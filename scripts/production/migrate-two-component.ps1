@@ -36,7 +36,7 @@ if (-not [int]::TryParse([Environment]::GetEnvironmentVariable('SMTP_PORT','Mach
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $backendZip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $InitialBackendZip))
 try {
-    $backendEntries = @($backendZip.Entries | ForEach-Object FullName)
+    $backendEntries = @($backendZip.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
     if ($backendEntries -notcontains 'server.js' -or -not ($backendEntries | Where-Object { $_ -like 'node_modules/*' })) { throw 'Initial backend ZIP is incomplete' }
 }
 finally { $backendZip.Dispose() }
