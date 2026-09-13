@@ -16,8 +16,9 @@ $ServiceName = 'BTSContactApi'
 $NodePath = 'C:\Program Files\nodejs\node.exe'
 $AppCmd = "$env:windir\system32\inetsrv\appcmd.exe"
 $DeployRoot = 'C:\ProgramData\BTS\deploy'
-$WorkerTarget = Join-Path $DeployRoot 'worker.ps1'
-$EnsureTarget = Join-Path $DeployRoot 'ensure-production.ps1'
+$TrustedRoot = Join-Path $DeployRoot 'trusted'
+$WorkerTarget = Join-Path $TrustedRoot 'worker.ps1'
+$EnsureTarget = Join-Path $TrustedRoot 'ensure-production.ps1'
 $StateRoot = Join-Path $DeployRoot 'state'
 $ServiceRoot = 'C:\ProgramData\BTS\contact-api'
 $ServiceExe = Join-Path $ServiceRoot 'BTSContactApi.exe'
@@ -187,9 +188,6 @@ if (-not (Test-Administrator)) { throw 'Infrastructure reconcile must run as Adm
 foreach ($path in $RequiredDirectories) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
 foreach ($asset in @($WorkerSource,$ServiceConfigSource,$WinSWSource)) {
     if (-not $asset -or -not (Test-Path -LiteralPath $asset)) { throw "Required infrastructure asset is missing: $asset" }
-}
-if (-not (Test-Path $WorkerTarget) -or (Get-FileHash $WorkerSource -Algorithm SHA256).Hash -ne (Get-FileHash $WorkerTarget -Algorithm SHA256).Hash) {
-    Copy-Item -LiteralPath $WorkerSource -Destination $WorkerTarget -Force
 }
 $task = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
 $desiredAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$WorkerTarget`""

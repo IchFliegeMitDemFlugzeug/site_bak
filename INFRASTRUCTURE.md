@@ -614,10 +614,17 @@ C:\ProgramData\BTS\deploy\
         legacy-production-path.txt
     logs\
         worker.log
-    worker.ps1
+    worker.ps1.before-v2-<timestamp>
+    trusted\
+        worker.ps1
+        ensure-production.ps1
+        WinSW-x64.exe
+        BTS.ContactApi.xml
 ```
 
-`incoming\` — зона загрузки ZIP и request/rollback JSON.
+`incoming\` — transport-зона загрузки component ZIP и request/rollback/reconcile JSON. Исполняемые `.ps1`/`.exe` и service XML через неё не доставляются.
+
+`trusted\` — закрытая зона infrastructure code/assets; FullControl имеют только `SYSTEM` и локальные `Administrators`, наследование ACL отключено, `bts-deploy` не имеет Write/Modify.
 
 `outbox\` — результат обработки конкретного release_id.
 
@@ -634,7 +641,7 @@ C:\ProgramData\BTS\deploy\
 Worker:
 
 ```text
-C:\ProgramData\BTS\deploy\worker.ps1
+C:\ProgramData\BTS\deploy\trusted\worker.ps1
 ```
 
 Scheduled Task:
@@ -867,8 +874,8 @@ Dry run:
 Live release дополнительно:
 
 1. проверяет SSH-доступность production;
-2. получает из фиксированного официального URL или staging cache WinSW 2.12.0 и проверяет Authenticode;
-3. загружает infrastructure assets и reconcile request; SYSTEM worker запускает `ensure-production.ps1` до component switch;
+2. формирует reconcile JSON с ожидаемыми hashes versioned worker/ensure/XML, но не загружает infrastructure code;
+3. SYSTEM worker сверяет hashes с закрытыми trusted files и запускает trusted `ensure-production.ps1` до component switch;
 4. перечитывает component state и пакует только изменённые компоненты;
 5. загружает ZIP через SCP и только затем request JSON;
 6. ожидает status `deployed` от worker v2;
@@ -1108,7 +1115,7 @@ curl.exe -sS -o nul -w "%{http_code}" https://btsys.ru/
 какой commit разрешён        → local HEAD == origin/main
 production release logic    → scripts/release-prod.ps1
 preflight logic             → scripts/preflight.ps1
-production switch logic     → C:\ProgramData\BTS\deploy\worker.ps1
+production switch logic     → C:\ProgramData\BTS\deploy\trusted\worker.ps1
 активный production path    → IIS BTS physical path
 активный release metadata   → C:\ProgramData\BTS\deploy\state\
 архитектура инфраструктуры  → INFRASTRUCTURE.md
@@ -1154,7 +1161,7 @@ C:\ProgramData\BTS\contact-api\BTSContactApi.exe
 C:\ProgramData\BTS\contact-api\BTSContactApi.xml
 ```
 
-`backend-current` — стабильный NTFS junction на immutable release. `release-prod.ps1` один раз скачивает фиксированный официальный WinSW 2.12.0 в staging cache, проверяет Authenticode и доставляет binary как infrastructure asset; production не обращается к package registry. Служба `BTSContactApi` запускает `C:\Sites\BTS\backend-current\server.js` от встроенной учётной записи `NT AUTHORITY\LocalService`, а не от `LocalSystem`. LocalService получает только read/execute на service/backend paths и modify на `C:\ProgramData\BTS\contact-api\logs`; прав на IIS, deploy, Git и staging у службы нет. До первого backend она установлена с Manual startup и не изображает успешный health; при валидном backend работает как Automatic. Backend слушает только `127.0.0.1:3001`.
+`backend-current` — стабильный NTFS junction на immutable release. Проверенный WinSW хранится в закрытом `C:\ProgramData\BTS\deploy\trusted` и попадает туда только через Administrator bootstrap; обычный release не загружает `.ps1`, `.exe` или service XML в `incoming`. Production не обращается к package registry. Служба `BTSContactApi` запускает `C:\Sites\BTS\backend-current\server.js` от встроенной учётной записи `NT AUTHORITY\LocalService`, а не от `LocalSystem`. LocalService получает только read/execute на service/backend paths и modify на `C:\ProgramData\BTS\contact-api\logs`; прав на IIS, deploy, Git и staging у службы нет. До первого backend она установлена с Manual startup и не изображает успешный health; при валидном backend работает как Automatic. Backend слушает только `127.0.0.1:3001`.
 
 IIS URL Rewrite + ARR хранит постоянное site-level правило вне `dist`: `/api/*` → `http://127.0.0.1:3001/api/*`. ARR добавляет фактический client IP в `X-Forwarded-For`; Express доверяет эту цепочку только когда непосредственный peer — loopback IIS. Bindings, HTTPS и certificates не меняются.
 
@@ -1182,12 +1189,16 @@ Frontend staging остаётся `<repo>\dist` сайта `BTS-STAGE`. `scripts
 
 Live reconcile идемпотентно создаёт служебные каталоги, синхронизирует worker v2, чинит action существующей Scheduled Task без замены разумных triggers/settings, устанавливает или чинит WinSW-службу и marker протокола. Если backend ещё отсутствует, proxy rule не создаётся, служба остаётся Manual, после чего worker разворачивает первый backend. Повторный ensure требует strict body `{"ok":true}`, переводит службу в Automatic и включает/чинит ARR proxy и правило `BTS API reverse proxy`. Frontend releases, baseline `20260911-193310_legacy-prod` и legacy production не удаляются.
 
-Единственный отдельный первоначальный шаг — `scripts\production\bootstrap-worker-v2.ps1`, вручную запускаемый Administrator на production. Он только сохраняет backup legacy worker, устанавливает worker v2 и канонический ensure, проверяет SYSTEM Scheduled Task и направляет её action на canonical worker. Он не создаёт backend, службу, IIS proxy или release и потому не является migration сайта. После этого bootstrap повторять не требуется: `release-prod.ps1` передаёт `*.reconcile.json`, worker проверяет hashes assets, запускает CheckOnly/apply под SYSTEM и пишет `checked/reconciled/reconcile_failed` в outbox. `bts-deploy` остаётся обычным пользователем с прежними правами только на transport folders.
+Отдельный Administrator-шаг — `scripts\production\bootstrap-worker-v2.ps1`. Он сохраняет backup legacy worker, создаёт `C:\ProgramData\BTS\deploy\trusted`, запрещает наследование ACL, оставляет FullControl только `SYSTEM` и локальным `Administrators`, явно удаляет grant `bts-deploy`, копирует туда worker/ensure/WinSW/XML и направляет SYSTEM Scheduled Task на trusted worker. Он не создаёт backend, службу, IIS proxy или release и потому не является migration сайта. Повторный bootstrap нужен только при осознанном обновлении trusted infrastructure files. Обычный `release-prod.ps1` передаёт исключительно `*.reconcile.json`; worker локально проверяет trusted hashes, запускает trusted CheckOnly/apply под SYSTEM и пишет `checked/reconciled/bootstrap_required/reconcile_failed` в outbox. `bts-deploy` остаётся обычным пользователем с прежними правами только на transport folders.
 
-Однократная команда запускается из временно доставленной на production папки с двумя versioned scripts:
+Bootstrap-команда запускается из временно доставленной на production папки с четырьмя проверенными infrastructure files:
 
 ```powershell
-.\bootstrap-worker-v2.ps1 -WorkerSource .\worker-v2.ps1 -EnsureSource .\ensure-production.ps1
+.\bootstrap-worker-v2.ps1 `
+    -WorkerSource .\worker-v2.ps1 `
+    -EnsureSource .\ensure-production.ps1 `
+    -ServiceConfigSource .\BTS.ContactApi.xml `
+    -WinSWSource .\WinSW-x64.exe
 ```
 
 После PASS временную папку можно удалить. Созданный рядом с production worker файл `worker.ps1.before-v2-<timestamp>` сохраняет только аварийную копию legacy worker и не является альтернативным release workflow.

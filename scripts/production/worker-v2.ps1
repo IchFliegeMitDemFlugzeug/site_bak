@@ -9,7 +9,26 @@ $BackendReleases = 'C:\Sites\BTS\backend-releases'
 $BackendCurrent = 'C:\Sites\BTS\backend-current'
 $ServiceName = 'BTSContactApi'
 $AppCmd = "$env:windir\system32\inetsrv\appcmd.exe"
-$EnsureTarget = Join-Path $DeployRoot 'ensure-production.ps1'
+$TrustedRoot = Join-Path $DeployRoot 'trusted'
+$TrustedWorker = Join-Path $TrustedRoot 'worker.ps1'
+$EnsureTarget = Join-Path $TrustedRoot 'ensure-production.ps1'
+$TrustedWinSW = Join-Path $TrustedRoot 'WinSW-x64.exe'
+$TrustedServiceConfig = Join-Path $TrustedRoot 'BTS.ContactApi.xml'
+
+function Test-TrustedAcl {
+    if (-not (Test-Path -LiteralPath $TrustedRoot -PathType Container)) { return $false }
+    $acl = Get-Acl -LiteralPath $TrustedRoot
+    if (-not $acl.AreAccessRulesProtected) { return $false }
+    $allowedSids = @('S-1-5-18','S-1-5-32-544')
+    $seenSids = @()
+    foreach ($rule in $acl.Access | Where-Object AccessControlType -eq 'Allow') {
+        try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
+        catch { return $false }
+        if ($allowedSids -notcontains $sid) { return $false }
+        $seenSids += $sid
+    }
+    return @($allowedSids | Where-Object { $seenSids -notcontains $_ }).Count -eq 0
+}
 
 function Write-Result([string]$ReleaseId, [string]$Status, [string]$Message, $Snapshot = $null, $Details = $null) {
     $result = [ordered]@{ release_id = $ReleaseId; status = $Status; message = $Message }
@@ -21,16 +40,6 @@ function Write-Result([string]$ReleaseId, [string]$Status, [string]$Message, $Sn
     Move-Item -LiteralPath $temporary -Destination $target -Force
 }
 
-function Test-Asset($Asset, [string]$RequestId, [string]$ExpectedSuffix) {
-    if ([string]$Asset.file -cne "$RequestId.$ExpectedSuffix") { throw "invalid reconcile asset: $ExpectedSuffix" }
-    if ([string]$Asset.sha256 -notmatch '^[0-9a-f]{64}$') { throw "invalid reconcile hash: $ExpectedSuffix" }
-    $path = Join-Path $Incoming ([string]$Asset.file)
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing reconcile asset: $ExpectedSuffix" }
-    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -ne [string]$Asset.sha256) { throw "reconcile asset hash mismatch: $ExpectedSuffix" }
-    return $path
-}
-
 function Process-Reconcile($Request, [string]$RequestPath) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if ($identity.User.Value -ne 'S-1-5-18') { throw 'reconcile requests may run only in the SYSTEM worker' }
@@ -39,22 +48,35 @@ function Process-Reconcile($Request, [string]$RequestPath) {
     if ([string]$Request.mode -notin @('check','apply')) { throw 'invalid reconcile mode' }
     if ([string]$Request.expected_worker_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'invalid expected worker hash' }
     if ([string]$Request.expected_ensure_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'invalid expected ensure hash' }
-    $assetPaths = @()
+    if ([string]$Request.expected_service_config_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'invalid expected service config hash' }
     try {
+        if (-not (Test-TrustedAcl)) {
+            Write-Result $requestId 'bootstrap_required' 'trusted infrastructure ACL is missing or unsafe; rerun Administrator bootstrap'
+            return
+        }
+        foreach ($trustedPath in @($TrustedWorker,$EnsureTarget,$TrustedServiceConfig,$TrustedWinSW)) {
+            if (-not (Test-Path -LiteralPath $trustedPath -PathType Leaf)) {
+                Write-Result $requestId 'bootstrap_required' "trusted infrastructure asset is missing: $([IO.Path]::GetFileName($trustedPath))"
+                return
+            }
+        }
+        $trustedWorkerHash = (Get-FileHash -LiteralPath $TrustedWorker -Algorithm SHA256).Hash.ToLowerInvariant()
+        $trustedEnsureHash = (Get-FileHash -LiteralPath $EnsureTarget -Algorithm SHA256).Hash.ToLowerInvariant()
+        $trustedConfigHash = (Get-FileHash -LiteralPath $TrustedServiceConfig -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($trustedWorkerHash -ne [string]$Request.expected_worker_sha256 -or
+            $trustedEnsureHash -ne [string]$Request.expected_ensure_sha256 -or
+            $trustedConfigHash -ne [string]$Request.expected_service_config_sha256) {
+            Write-Result $requestId 'bootstrap_required' 'trusted infrastructure assets are outdated; rerun Administrator bootstrap'
+            return
+        }
         if ([string]$Request.mode -eq 'apply') {
-            $ensureSource = Test-Asset $Request.assets.ensure $requestId 'ensure-production.ps1'
-            $workerSource = Test-Asset $Request.assets.worker $requestId 'worker-v2.ps1'
-            $configSource = Test-Asset $Request.assets.service_config $requestId 'BTS.ContactApi.xml'
-            $winSWSource = Test-Asset $Request.assets.winsw $requestId 'WinSW-x64.exe'
-            $assetPaths = @($ensureSource,$workerSource,$configSource,$winSWSource)
-            Copy-Item -LiteralPath $ensureSource -Destination $EnsureTarget -Force
-            $output = & $EnsureTarget -WorkerSource $workerSource -ServiceConfigSource $configSource -WinSWSource $winSWSource -ExpectedWorkerHash $Request.expected_worker_sha256 -ExpectedEnsureHash $Request.expected_ensure_sha256
+            $output = & $EnsureTarget -WorkerSource $TrustedWorker -ServiceConfigSource $TrustedServiceConfig -WinSWSource $TrustedWinSW -ExpectedWorkerHash $Request.expected_worker_sha256 -ExpectedEnsureHash $Request.expected_ensure_sha256
             $details = ($output | Select-Object -Last 1) | ConvertFrom-Json
             Write-Result $requestId 'reconciled' 'production infrastructure reconciled by SYSTEM worker' $null $details
         }
         else {
             if (-not (Test-Path -LiteralPath $EnsureTarget -PathType Leaf)) { throw 'worker bootstrap is required: canonical ensure-production.ps1 is missing' }
-            $output = & $EnsureTarget -CheckOnly -WorkerSource $PSCommandPath -ExpectedWorkerHash $Request.expected_worker_sha256 -ExpectedEnsureHash $Request.expected_ensure_sha256
+            $output = & $EnsureTarget -CheckOnly -WorkerSource $TrustedWorker -ExpectedWorkerHash $Request.expected_worker_sha256 -ExpectedEnsureHash $Request.expected_ensure_sha256
             $details = ($output | Select-Object -Last 1) | ConvertFrom-Json
             Write-Result $requestId 'checked' 'production infrastructure checked without changes' $null $details
         }
@@ -63,7 +85,6 @@ function Process-Reconcile($Request, [string]$RequestPath) {
         Write-Result $requestId 'reconcile_failed' $_.Exception.Message
     }
     finally {
-        foreach ($assetPath in $assetPaths) { Remove-Item -LiteralPath $assetPath -Force -ErrorAction SilentlyContinue }
         Move-Item -LiteralPath $RequestPath -Destination (Join-Path $Processed ([IO.Path]::GetFileName($RequestPath))) -Force
     }
 }

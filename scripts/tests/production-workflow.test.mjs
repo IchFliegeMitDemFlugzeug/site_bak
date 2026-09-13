@@ -13,7 +13,7 @@ test('release never invokes ensure directly over SSH', () => {
   assert.doesNotMatch(release, /powershell\.exe[^\n]+ensure-production\.ps1/i);
   assert.doesNotMatch(release, /function Get-ProductionState/);
   assert.match(release, /Invoke-ReconcileRequest -Mode check/);
-  assert.match(worker, /& \$EnsureTarget -CheckOnly -WorkerSource \$PSCommandPath/);
+  assert.match(worker, /& \$EnsureTarget -CheckOnly -WorkerSource \$TrustedWorker/);
 });
 
 test('dry run reaches only the check request and exits before apply assets', () => {
@@ -21,7 +21,7 @@ test('dry run reaches only the check request and exits before apply assets', () 
   const guard = release.indexOf('if ($dryrun)');
   const apply = release.indexOf('Invoke-ReconcileRequest -Mode apply');
   assert.ok(check > 0 && check < guard && guard < apply);
-  assert.ok(guard < release.indexOf('$winSW = Get-WinSW'));
+  assert.doesNotMatch(release, /Get-WinSW|WinSWUrl|request\['assets'\]/);
 });
 
 test('SYSTEM worker owns both check-only and apply reconcile execution', () => {
@@ -32,11 +32,41 @@ test('SYSTEM worker owns both check-only and apply reconcile execution', () => {
   assert.match(worker, /Get-ChildItem \$Incoming -Filter '\*\.reconcile\.json'/);
 });
 
+test('worker executes infrastructure only from trusted paths', () => {
+  assert.match(worker, /Join-Path \$DeployRoot 'trusted'/);
+  assert.match(worker, /Test-TrustedAcl/);
+  assert.match(worker, /AreAccessRulesProtected/);
+  assert.match(worker, /& \$EnsureTarget -WorkerSource \$TrustedWorker -ServiceConfigSource \$TrustedServiceConfig -WinSWSource \$TrustedWinSW/);
+  assert.doesNotMatch(worker, /& .*\$Incoming|Join-Path \$Incoming.*\.ps1|Join-Path \$Incoming.*\.exe/);
+  assert.doesNotMatch(worker, /Request\.assets/);
+});
+
+test('trusted version mismatch returns bootstrap_required without reconcile', () => {
+  const mismatch = worker.indexOf("Write-Result $requestId 'bootstrap_required' 'trusted infrastructure assets are outdated");
+  const execute = worker.indexOf('$output = & $EnsureTarget');
+  assert.ok(mismatch > 0 && mismatch < execute);
+  assert.match(release, /'checked','bootstrap_required','reconcile_failed'/);
+});
+
+test('release uploads no infrastructure scripts, executables or XML', () => {
+  const uploadLines = release.split('\n').filter((line) => line.includes('Copy-ToProduction'));
+  assert.ok(uploadLines.length > 0);
+  for (const line of uploadLines) assert.doesNotMatch(line, /EnsureSource|WorkerSource|ServiceConfigSource|WinSW|\.ps1|\.exe|\.xml/i);
+});
+
 test('bootstrap only installs the worker broker and canonical ensure', () => {
   assert.match(bootstrap, /Run this one-time worker bootstrap as Administrator/);
   assert.match(bootstrap, /Copy-Item -LiteralPath \$WorkerSource/);
   assert.match(bootstrap, /Copy-Item -LiteralPath \$EnsureSource/);
-  assert.doesNotMatch(bootstrap, /BTSContactApi|backend-current|Set-WebConfiguration|npm/);
+  assert.match(bootstrap, /Copy-Item -LiteralPath \$ServiceConfigSource/);
+  assert.match(bootstrap, /Copy-Item -LiteralPath \$WinSWSource/);
+  assert.match(bootstrap, /Join-Path \$DeployRoot 'trusted'/);
+  assert.match(bootstrap, /\/inheritance:r/);
+  assert.match(bootstrap, /\*S-1-5-18:\(OI\)\(CI\)F/);
+  assert.match(bootstrap, /\*S-1-5-32-544:\(OI\)\(CI\)F/);
+  assert.match(bootstrap, /\/remove:g','bts-deploy'/);
+  assert.doesNotMatch(bootstrap, /bts-deploy.*(?:grant|modify|write)/i);
+  assert.doesNotMatch(bootstrap, /(?:Start|Stop|Set|New)-Service|backend-current|Set-WebConfiguration|npm/);
 });
 
 test('ensure validates prerequisites and SMTP port before mutations', () => {

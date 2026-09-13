@@ -10,9 +10,6 @@ $EnsureSource = Join-Path $Repo 'scripts\production\ensure-production.ps1'
 $WorkerSource = Join-Path $Repo 'scripts\production\worker-v2.ps1'
 $ServiceConfigSource = Join-Path $Repo 'backend\config\BTS.ContactApi.xml'
 $OutRoot = Join-Path $Repo '.release'
-$WinSWVersion = '2.12.0'
-$WinSWCache = Join-Path $OutRoot "tools\winsw-$WinSWVersion\WinSW-x64.exe"
-$WinSWUrl = "https://github.com/winsw/winsw/releases/download/v$WinSWVersion/WinSW-x64.exe"
 $SshKey = 'C:\ProgramData\BTS\ssh\bts_prod_ed25519'
 $Remote = 'bts-deploy@135.106.194.75'
 $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
@@ -68,23 +65,8 @@ function New-ReconcileId {
     return "reconcile_$(Get-Date -Format yyyyMMdd-HHmmss)_$random"
 }
 
-function Get-AssetDescriptor {
-    param(
-        [Parameter(Mandatory = $true)][string]$RequestId,
-        [Parameter(Mandatory = $true)][string]$Suffix,
-        [Parameter(Mandatory = $true)][string]$LocalPath
-    )
-    return [ordered]@{
-        file = "$RequestId.$Suffix"
-        sha256 = (Get-FileHash -LiteralPath $LocalPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    }
-}
-
 function Invoke-ReconcileRequest {
-    param(
-        [Parameter(Mandatory = $true)][ValidateSet('check','apply')][string]$Mode,
-        [string]$WinSWPath
-    )
+    param([Parameter(Mandatory = $true)][ValidateSet('check','apply')][string]$Mode)
     $requestId = New-ReconcileId
     $localDirectory = Join-Path $OutRoot $requestId
     $requestPath = Join-Path $localDirectory "$requestId.reconcile.json"
@@ -94,29 +76,14 @@ function Invoke-ReconcileRequest {
         mode=$Mode
         expected_worker_sha256=(Get-FileHash -LiteralPath $WorkerSource -Algorithm SHA256).Hash.ToLowerInvariant()
         expected_ensure_sha256=(Get-FileHash -LiteralPath $EnsureSource -Algorithm SHA256).Hash.ToLowerInvariant()
-    }
-    if ($Mode -eq 'apply') {
-        if (-not $WinSWPath) { throw 'WinSW path is required for reconcile apply.' }
-        $request['assets'] = [ordered]@{
-            ensure = (Get-AssetDescriptor -RequestId $requestId -Suffix 'ensure-production.ps1' -LocalPath $EnsureSource)
-            worker = (Get-AssetDescriptor -RequestId $requestId -Suffix 'worker-v2.ps1' -LocalPath $WorkerSource)
-            service_config = (Get-AssetDescriptor -RequestId $requestId -Suffix 'BTS.ContactApi.xml' -LocalPath $ServiceConfigSource)
-            winsw = (Get-AssetDescriptor -RequestId $requestId -Suffix 'WinSW-x64.exe' -LocalPath $WinSWPath)
-        }
-        foreach ($entry in @(
-            @{ descriptor=$request.assets.ensure; source=$EnsureSource },
-            @{ descriptor=$request.assets.worker; source=$WorkerSource },
-            @{ descriptor=$request.assets.service_config; source=$ServiceConfigSource },
-            @{ descriptor=$request.assets.winsw; source=$WinSWPath }
-        )) {
-            Copy-ToProduction -LocalPath $entry.source -RemotePath "C:/ProgramData/BTS/deploy/incoming/$($entry.descriptor.file)"
-        }
+        expected_service_config_sha256=(Get-FileHash -LiteralPath $ServiceConfigSource -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     [IO.File]::WriteAllText($requestPath, ($request | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
     Copy-ToProduction -LocalPath $requestPath -RemotePath "C:/ProgramData/BTS/deploy/incoming/$requestId.reconcile.json"
-    $terminal = if ($Mode -eq 'check') { @('checked','reconcile_failed') } else { @('reconciled','reconcile_failed') }
+    $terminal = if ($Mode -eq 'check') { @('checked','bootstrap_required','reconcile_failed') } else { @('reconciled','bootstrap_required','reconcile_failed') }
     $timeout = if ($Mode -eq 'check') { 75 } else { 240 }
     $result = Get-RemoteResult -RequestId $requestId -TerminalStatuses $terminal -TimeoutSeconds $timeout
+    if ($result.status -eq 'bootstrap_required') { throw "trusted production infrastructure is outdated: $($result.message)" }
     if ($result.status -eq 'reconcile_failed') { throw "production reconcile failed: $($result.message)" }
     return $result
 }
@@ -136,22 +103,6 @@ function Show-InfrastructureResult {
     Write-Host "API proxy ........... $(if ($Details.api_proxy) { 'PASS' } elseif ($Details.backend_health) { 'REPAIR REQUIRED' } else { 'NOT READY' })"
     Write-Host "SMTP environment ... $(Mark $Details.smtp_environment 'MISSING/INVALID')"
     Write-Host "Infrastructure action: $(if ($Details.reconcile_required) { 'RECONCILE' } else { 'PASS' })"
-}
-
-function Get-WinSW {
-    New-Item -ItemType Directory -Path (Split-Path -Parent $WinSWCache) -Force | Out-Null
-    if (Test-Path -LiteralPath $WinSWCache) {
-        $signature = Get-AuthenticodeSignature -FilePath $WinSWCache
-        if ($signature.Status -eq 'Valid') { return $WinSWCache }
-        Remove-Item -LiteralPath $WinSWCache -Force
-    }
-    Invoke-WebRequest -UseBasicParsing -Uri $WinSWUrl -OutFile $WinSWCache
-    $signature = Get-AuthenticodeSignature -FilePath $WinSWCache
-    if ($signature.Status -ne 'Valid') {
-        Remove-Item -LiteralPath $WinSWCache -Force
-        throw "Downloaded WinSW signature is not valid: $($signature.Status)"
-    }
-    return $WinSWCache
 }
 
 function Get-HttpResult {
@@ -226,8 +177,7 @@ if ($dryrun) {
 }
 
 Write-Host '=== SYSTEM infrastructure reconcile ==='
-$winSW = Get-WinSW
-$reconcileResult = Invoke-ReconcileRequest -Mode apply -WinSWPath $winSW
+$reconcileResult = Invoke-ReconcileRequest -Mode apply
 $production = $reconcileResult.details
 Show-InfrastructureResult $production
 $productionFrontendTree = [string]$production.frontend_tree
@@ -270,7 +220,7 @@ Copy-ToProduction -LocalPath $requestPath -RemotePath "C:/ProgramData/BTS/deploy
 $result = Get-RemoteResult -RequestId $releaseId -TerminalStatuses @('deployed','rolled_back','failed')
 if ($result.status -ne 'deployed') { throw "worker deployment failed: $($result.status): $($result.message)" }
 
-Invoke-ReconcileRequest -Mode apply -WinSWPath $winSW | Out-Null
+Invoke-ReconcileRequest -Mode apply | Out-Null
 [xml]$sitemap = Get-Content (Join-Path $Dist 'sitemap.xml') -Raw
 $urls = @($sitemap.SelectNodes("//*[local-name()='loc']") | ForEach-Object { $_.InnerText.Trim() })
 $externalOk = $false
@@ -293,7 +243,7 @@ if (-not $externalOk) {
     [IO.File]::WriteAllText($rollbackPath, ($rollback | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
     Copy-ToProduction -LocalPath $rollbackPath -RemotePath "C:/ProgramData/BTS/deploy/incoming/$releaseId.rollback.json"
     $rollbackResult = Get-RemoteResult -RequestId $releaseId -TerminalStatuses @('rolled_back_external','rollback_request_failed')
-    try { Invoke-ReconcileRequest -Mode apply -WinSWPath $winSW | Out-Null } catch { Write-Warning "post-rollback reconcile failed: $($_.Exception.Message)" }
+    try { Invoke-ReconcileRequest -Mode apply | Out-Null } catch { Write-Warning "post-rollback reconcile failed: $($_.Exception.Message)" }
     throw "external checks failed after three attempts; rollback status $($rollbackResult.status): $externalError"
 }
 Write-Host "PASS: production release $releaseId ($head)"

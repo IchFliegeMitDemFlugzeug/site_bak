@@ -182,11 +182,11 @@ Production использует immutable release-папки:
 
 Worker:
 
-`C:\ProgramData\BTS\deploy\worker.ps1`
+`C:\ProgramData\BTS\deploy\trusted\worker.ps1`
 
 Он запускается как `SYSTEM` через Task Scheduler.
 
-Worker является единственным production-исполнителем `ensure-production.ps1`: SSH-пользователь только передаёт reconcile request/assets через `incoming` и читает результат из `outbox`. Единственный ручной bootstrap допускается только для первоначальной замены legacy worker на worker v2 и установки канонического ensure; он не является миграцией сайта/backend.
+Worker является единственным production-исполнителем `ensure-production.ps1`: SSH-пользователь передаёт через `incoming` только reconcile JSON и обычные component artifacts, затем читает результат из `outbox`. Исполняемые infrastructure assets находятся только в закрытом `C:\ProgramData\BTS\deploy\trusted` и обновляются исключительно Administrator bootstrap. Единственный ручной bootstrap допускается для первоначальной замены legacy worker и последующего осознанного обновления trusted worker/ensure/WinSW/XML; он не является миграцией сайта/backend.
 
 SSH-пользователь `bts-deploy` не является администратором. Не выдавать ему административные права, если это специально не согласовано.
 
