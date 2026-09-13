@@ -156,3 +156,56 @@ test('backend startup health check has a bounded grace period', () => {
   assert.match(worker, /backend health failed after startup grace period/);
   assert.match(worker, /backendTarget 'start\.js'/);
 });
+test('IIS rewrite rule reads effective action enum directly', () => {
+  assert.match(
+    ensure,
+    /\$matchElement\s*=\s*Get-WebConfiguration[\s\S]*?-Filter\s+"\$filter\/match"/
+  );
+
+  assert.match(
+    ensure,
+    /\$actionElement\s*=\s*Get-WebConfiguration[\s\S]*?-Filter\s+"\$filter\/action"/
+  );
+
+  assert.match(
+    ensure,
+    /\$pattern\s*=\s*\[string\]\$matchElement\.url/
+  );
+
+  assert.match(
+    ensure,
+    /\$target\s*=\s*\[string\]\$actionElement\.url/
+  );
+
+  assert.match(
+    ensure,
+    /\$action\s*=\s*\[string\]\$actionElement\.type/
+  );
+
+  assert.doesNotMatch(
+    ensure,
+    /Get-WebConfigurationProperty[^\n]*-Name 'type'\)\.Value/
+  );
+
+  assert.match(
+    ensure,
+    /\$action\s+-eq\s+'Rewrite'/
+  );
+});
+
+test('reconcile failure reports failed state flags', () => {
+  assert.match(
+    ensure,
+    /\$failedFlags\s*=\s*@\(\)/
+  );
+
+  assert.match(
+    ensure,
+    /Production infrastructure is still inconsistent after reconcile:/
+  );
+
+  assert.match(
+    ensure,
+    /\$after\.backend_health\s+-and\s+-not\s+\$after\.api_proxy/
+  );
+});

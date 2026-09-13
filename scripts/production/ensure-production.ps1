@@ -86,10 +86,22 @@ function Get-RuleState {
     $filter = "system.webServer/rewrite/rules/rule[@name='$RuleName']"
     $rule = Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Location $SiteName -Filter $filter -Name '.' -ErrorAction SilentlyContinue
     if (-not $rule) { return [pscustomobject]@{ Present=$false; Correct=$false } }
-    $pattern = [string](Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Location $SiteName -Filter "$filter/match" -Name 'url').Value
-    $target = [string](Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Location $SiteName -Filter "$filter/action" -Name 'url').Value
-    $action = [string](Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Location $SiteName -Filter "$filter/action" -Name 'type').Value
-    return [pscustomobject]@{ Present=$true; Correct=($pattern -ceq $RulePattern -and $target -ceq $RuleTarget -and $action -eq 'Rewrite') }
+
+    $matchElement = Get-WebConfiguration -PSPath 'MACHINE/WEBROOT/APPHOST' -Location $SiteName -Filter "$filter/match"
+    $actionElement = Get-WebConfiguration -PSPath 'MACHINE/WEBROOT/APPHOST' -Location $SiteName -Filter "$filter/action"
+
+    $pattern = [string]$matchElement.url
+    $target = [string]$actionElement.url
+    $action = [string]$actionElement.type
+
+    return [pscustomobject]@{
+        Present = $true
+        Correct = (
+            $pattern -ceq $RulePattern -and
+            $target -ceq $RuleTarget -and
+            $action -eq 'Rewrite'
+        )
+    }
 }
 
 function Get-InfrastructureState {
@@ -249,5 +261,27 @@ else {
 [IO.File]::WriteAllText((Join-Path $StateRoot 'deployment-schema-version.txt'), $SchemaVersion, (New-Object Text.UTF8Encoding($false)))
 $after = Get-InfrastructureState
 Write-StateSummary $after
-if ($after.reconcile_required) { throw 'Production infrastructure is still inconsistent after reconcile.' }
+
+if ($after.reconcile_required) {
+    $failedFlags = @()
+
+    if (-not $after.directories) { $failedFlags += 'directories' }
+    if (-not $after.worker) { $failedFlags += 'worker' }
+    if (-not $after.ensure) { $failedFlags += 'ensure' }
+    if (-not $after.scheduled_task) { $failedFlags += 'scheduled_task' }
+    if (-not $after.service_ready) { $failedFlags += 'service_ready' }
+    if (-not $after.schema) { $failedFlags += 'schema' }
+    if (-not $after.arr_enabled) { $failedFlags += 'arr_enabled' }
+
+    if ($after.backend_health -and -not $after.api_proxy) {
+        $failedFlags += 'api_proxy'
+    }
+
+    if ($failedFlags.Count -eq 0) {
+        $failedFlags += 'unknown'
+    }
+
+    throw "Production infrastructure is still inconsistent after reconcile: $($failedFlags -join ', ')"
+}
+
 [pscustomobject]$after | ConvertTo-Json -Compress
