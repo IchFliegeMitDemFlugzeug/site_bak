@@ -118,7 +118,7 @@
           pattern: 'S-METRICS S-EDITORIAL-MEDIA',
           titleRole: 'T-DISPLAY-L',
           theme: 'light',
-          variants: [],
+          variants: ['balanced-metrics', 'media-prominent'],
           media: [
             { id: 'MEDIA-PRODUCTS-02-VIDEO-FLEXIBILITY', selector: 'video[src$="/flexibility.mp4"]' },
           ],
@@ -129,10 +129,10 @@
           pattern: 'S-GALLERY',
           titleRole: 'T-DISPLAY-M',
           theme: 'paper',
-          variants: [],
+          variants: ['media-contained'],
           media: [
             { id: 'MEDIA-PRODUCTS-01-HERO-TANK', selector: 'img[src$="/product-hero.webp"]' },
-            { id: 'MEDIA-HOME-05-KIT', selector: 'img[src$="/tank-kit.webp"]' },
+            { id: 'MEDIA-PRODUCTS-08-DETAIL', selector: 'img[src$="/pickup-detail.webp"]' },
             { id: 'MEDIA-PRODUCTS-05-01', selector: 'img[src$="/neck-open.webp"]' },
             { id: 'MEDIA-PRODUCTS-05-02', selector: 'img[src$="/neck-parts.webp"]' },
             { id: 'MEDIA-PRODUCTS-05-03', selector: 'img[src$="/neck-assembled.webp"]' },
@@ -145,7 +145,7 @@
           pattern: 'S-GALLERY S-METRICS',
           titleRole: 'T-DISPLAY-L',
           theme: 'contrast-light',
-          variants: [],
+          variants: ['aligned-card-copy', 'metric-pair'],
           media: [
             { id: 'MEDIA-PRODUCTS-03-INNER-LAYER', selector: 'img[src$="/shell-inner.webp"]' },
             { id: 'MEDIA-PRODUCTS-03-OUTER-LAYER', selector: 'img[src$="/shell-outer.webp"]' },
@@ -158,10 +158,12 @@
           pattern: 'S-EDITORIAL-MEDIA',
           titleRole: 'T-DISPLAY-L',
           theme: 'light',
-          variants: ['cards-above-media', 'two-media-centered'],
+          variants: ['text-gallery-aside'],
           media: [
             { id: 'MEDIA-HOME-05-TANK-COVER', selector: 'img[src$="/product-hero.webp"]' },
             { id: 'MEDIA-HOME-05-MATERIAL-EDGE', selector: 'img[src$="/rubberized-fabric.webp"]' },
+            { id: 'MEDIA-PRODUCTS-13-MOCKUP-02', selector: 'img[src$="/mockup-close.webp"]' },
+            { id: 'MEDIA-PRODUCTS-13-MOCKUP-01', selector: 'img[src$="/mockup-full.webp"]' },
           ],
         },
         {
