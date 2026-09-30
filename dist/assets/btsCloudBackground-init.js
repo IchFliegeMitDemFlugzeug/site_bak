@@ -1,5 +1,5 @@
 // Импортируем существующий генератор процедурного облачного фона.
-import { mountBTSCloudBackground } from './btsCloudBackground.js';
+import { mountBTSCloudBackground } from './btsCloudBackground.js?v=10.2';
 
 // Находим только первый Hero-блок существующего сайта.
 const hero = document.querySelector('.hero');

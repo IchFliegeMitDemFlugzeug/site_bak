@@ -194,6 +194,11 @@ async function findBrokenVideos(page, testInfo, pagePath) {
     await video.scrollIntoViewIfNeeded();
     try {
       const result = await video.evaluate(async element => {
+        // Production intentionally keeps MP4 in data-src until the video approaches the viewport.
+        // Hydrate it explicitly here so the media test remains deterministic.
+        if (!element.getAttribute('src') && element.dataset.src) {
+          element.src = element.dataset.src;
+        }
         element.preload = 'metadata';
         // Start an untouched video, but never restart an in-flight request and create a false requestfailed.
         if (element.networkState === HTMLMediaElement.NETWORK_EMPTY) element.load();
@@ -250,7 +255,7 @@ async function collectInternalMedia(page) {
       add(element.currentSrc || element.src, 'image');
     });
     document.querySelectorAll('video').forEach(element => {
-      add(element.currentSrc || element.src, 'video');
+      add(element.currentSrc || element.src || element.dataset.src, 'video');
       add(element.poster, 'image');
     });
     document.querySelectorAll('source[src]').forEach(element => {
@@ -353,7 +358,41 @@ test(
   }
 );
 
-// Keep the three focused interaction regressions on the two primary phones only.
+// Guard the mobile first-load optimization: off-screen MP4 files must not compete with Hero resources.
+test('mobile first screen defers video downloads', { tag: '@mobile-interaction' }, async ({ page }, testInfo) => {
+  const mp4Requests = [];
+  page.on('request', request => {
+    if (/\.mp4(?:$|\?)/i.test(request.url())) mp4Requests.push(request.url());
+  });
+
+  for (const path of ['/', '/products/']) {
+    await progressStep(testInfo, path, 'mobile first-load video deferral', async () => {
+      mp4Requests.length = 0;
+      await page.goto(path, { waitUntil: 'load' });
+      await expect(page.locator('main')).toBeVisible();
+
+      // Give IntersectionObserver and the browser two paint cycles without introducing a time-based sleep.
+      await page.evaluate(() => new Promise(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }));
+
+      expect(mp4Requests, `unexpected MP4 requests before scrolling on ${path}:\n${mp4Requests.join('\n')}`).toEqual([]);
+
+      const videos = page.locator('video[data-smart-video]');
+      const count = await videos.count();
+      expect(count).toBeGreaterThan(0);
+
+      for (let index = 0; index < count; index += 1) {
+        const video = videos.nth(index);
+        await expect(video).not.toHaveAttribute('src', /.+/);
+        await expect(video).toHaveAttribute('data-src', /\.mp4$/);
+        await expect(video).toHaveAttribute('preload', 'none');
+      }
+    });
+  }
+});
+
+// Keep the focused interaction regressions on the two primary phones only.
 test('FAQ details opens', { tag: '@mobile-interaction' }, async ({ page }, testInfo) => {
   const prefix = diagnosticPrefix(testInfo, '/faq/');
   await progressStep(testInfo, '/faq/', 'navigation', () => page.goto('/faq/', { waitUntil: 'domcontentloaded' }));
