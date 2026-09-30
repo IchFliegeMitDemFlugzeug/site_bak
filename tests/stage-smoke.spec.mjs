@@ -48,6 +48,44 @@ function diagnosticPrefix(testInfo, pagePath) {
   return `[${testInfo.project.name}] ${pagePath} viewport=${dimensions}`;
 }
 
+// Run one visible smoke-test step while reporting its context, duration and failures.
+async function progressStep(testInfo, pagePath, stepName, action) {
+  // Keep the requested project and page labels stable for every progress message.
+  const prefix = `[${testInfo.project.name}] [${pagePath}]`;
+  // Use a monotonic clock so system-clock corrections cannot distort the duration.
+  const startedAt = performance.now();
+  // Announce the work before it starts, which makes a slow operation easy to identify.
+  console.log(`${prefix} → ${stepName}`);
+  // Report a heartbeat every five seconds until the operation settles.
+  const heartbeat = setInterval(() => {
+    // Round down to whole seconds to keep the waiting message compact and predictable.
+    const elapsedSeconds = Math.floor((performance.now() - startedAt) / 1000);
+    // Repeat the step name so concurrent reporter output remains understandable.
+    console.log(`${prefix} … still waiting: ${stepName} (${elapsedSeconds} s)`);
+  }, 5_000);
+
+  try {
+    // Return the callback result unchanged so the helper does not alter test behaviour.
+    const result = await action();
+    // Measure successful completion only after every operation in the callback has finished.
+    const elapsedSeconds = ((performance.now() - startedAt) / 1000).toFixed(1);
+    // Print the requested success marker and the complete step duration.
+    console.log(`${prefix} ✓ ${stepName} (${elapsedSeconds} s)`);
+    // Preserve values such as Playwright navigation responses for the existing assertions.
+    return result;
+  } catch (error) {
+    // Print the failed step before the underlying Playwright error is rethrown.
+    console.error(`${prefix} ✗ ${stepName}`);
+    // Prefer the normal Error message while still supporting non-Error thrown values.
+    console.error(`${prefix} ${error instanceof Error ? error.message : String(error)}`);
+    // Rethrow the original value so assertions, stacks and test outcomes stay unchanged.
+    throw error;
+  } finally {
+    // Always stop the heartbeat, including when the callback fails.
+    clearInterval(heartbeat);
+  }
+}
+
 // Monitor browser exceptions and network failures from before navigation begins.
 function watchPage(page, testInfo, pagePath) {
   const prefix = diagnosticPrefix(testInfo, pagePath);
@@ -60,12 +98,18 @@ function watchPage(page, testInfo, pagePath) {
     pageErrors.push(`${prefix} JavaScript exception: ${error.message}`);
   });
 
-  // Any failed staging request is noteworthy, including a browser media request.
+  // Keep every staging request failure except a browser-cancelled media fetch.
   page.on('requestfailed', request => {
+    // Read the resource kind once so the exception remains limited to video or audio media.
+    const resourceType = request.resourceType();
+    // Preserve Playwright's exact failure text for both filtering and later diagnostics.
+    const errorText = request.failure()?.errorText || 'unknown network failure';
+    // Browsers can abort a superseded media fetch even though the video loads successfully.
+    if (resourceType === 'media' && errorText.includes('ERR_ABORTED')) return;
+    // Continue treating every other failed request from the staging origin as critical.
     if (isStageRequest(request.url())) {
       failedRequests.push(
-        `${prefix} requestfailed: ${request.resourceType()} ${request.url()} :: ` +
-        `${request.failure()?.errorText || 'unknown network failure'}`
+        `${prefix} requestfailed: ${resourceType} ${request.url()} :: ${errorText}`
       );
     }
   });
@@ -257,70 +301,84 @@ for (const pageCase of [...primaryPages, errorPage]) {
   test(`${pageCase.name} opens correctly`, async ({ page, request }, testInfo) => {
     const prefix = diagnosticPrefix(testInfo, pageCase.path);
     const runtime = watchPage(page, testInfo, pageCase.path);
-    const response = await page.goto(pageCase.path, { waitUntil: 'domcontentloaded' });
+    const response = await progressStep(testInfo, pageCase.path, 'navigation', () =>
+      page.goto(pageCase.path, { waitUntil: 'domcontentloaded' })
+    );
 
     // Navigation must yield a real response with the established 200 or 404 status.
-    expect(response, `${prefix} navigation returned no HTTP response`).not.toBeNull();
-    expect(response.status(), `${prefix} unexpected page HTTP status URL=${page.url()}`).toBe(pageCase.status);
+    await progressStep(testInfo, pageCase.path, 'page load', async () => {
+      expect(response, `${prefix} navigation returned no HTTP response`).not.toBeNull();
+      expect(response.status(), `${prefix} unexpected page HTTP status URL=${page.url()}`).toBe(pageCase.status);
 
-    // Staging crawler isolation must remain an IIS header, not production HTML.
-    const robotsHeader = response.headers()['x-robots-tag'] || '';
-    expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag noindex`).toContain('noindex');
-    expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag nofollow`).toContain('nofollow');
-    expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag noarchive`).toContain('noarchive');
+      // Staging crawler isolation must remain an IIS header, not production HTML.
+      const robotsHeader = response.headers()['x-robots-tag'] || '';
+      expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag noindex`).toContain('noindex');
+      expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag nofollow`).toContain('nofollow');
+      expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag noarchive`).toContain('noarchive');
 
-    // Allow synchronous scripts to mount the navigation before checking the document.
-    await page.waitForTimeout(750);
-    expect((await page.title()).trim().length, `${prefix} empty title`).toBeGreaterThan(0);
+      // Allow synchronous scripts to mount the navigation before checking the document.
+      await page.waitForTimeout(750);
+      expect((await page.title()).trim().length, `${prefix} empty title`).toBeGreaterThan(0);
 
-    // Production pages must not accidentally acquire a deployable meta noindex.
-    if (pageCase.status === 200) {
-      const robotsMetaContent = await page.locator('meta[name="robots"]').evaluateAll(elements =>
-        elements.map(element => element.getAttribute('content') || '')
-      );
-      expect(robotsMetaContent.join(' ').toLowerCase(), `${prefix} production noindex`).not.toContain('noindex');
-    }
+      // Production pages must not accidentally acquire a deployable meta noindex.
+      if (pageCase.status === 200) {
+        const robotsMetaContent = await page.locator('meta[name="robots"]').evaluateAll(elements =>
+          elements.map(element => element.getAttribute('content') || '')
+        );
+        expect(robotsMetaContent.join(' ').toLowerCase(), `${prefix} production noindex`).not.toContain('noindex');
+      }
+    });
 
     // Preserve attachment and destination checks for the generated global navigation.
-    await expect(page.locator('nav[data-navigation]'), `${prefix} navigation missing`).toBeAttached();
-    for (const path of navigationPaths) {
-      await expect(
-        page.locator(`nav[data-navigation] a[href="${path}"]`),
-        `${prefix} navigation link missing URL=${path}`
-      ).toHaveCount(1);
-    }
+    await progressStep(testInfo, pageCase.path, 'navigation/menu', async () => {
+      await expect(page.locator('nav[data-navigation]'), `${prefix} navigation missing`).toBeAttached();
+      for (const path of navigationPaths) {
+        await expect(
+          page.locator(`nav[data-navigation] a[href="${path}"]`),
+          `${prefix} navigation link missing URL=${path}`
+        ).toHaveCount(1);
+      }
+    });
 
     // All main pages must fit both the root element and body at this exact viewport.
     if (pageCase.status === 200) {
-      const layout = await page.evaluate(() => ({
-        rootScrollWidth: document.documentElement.scrollWidth,
-        rootClientWidth: document.documentElement.clientWidth,
-        bodyScrollWidth: document.body.scrollWidth,
-        bodyClientWidth: document.body.clientWidth,
-      }));
-      expect(
-        layout.rootScrollWidth,
-        `${prefix} horizontal overflow: documentElement ${layout.rootScrollWidth}>${layout.rootClientWidth}+1`
-      ).toBeLessThanOrEqual(layout.rootClientWidth + 1);
-      expect(
-        layout.bodyScrollWidth,
-        `${prefix} horizontal overflow: body ${layout.bodyScrollWidth}>${layout.bodyClientWidth}+1`
-      ).toBeLessThanOrEqual(layout.bodyClientWidth + 1);
+      await progressStep(testInfo, pageCase.path, 'horizontal overflow', async () => {
+        const layout = await page.evaluate(() => ({
+          rootScrollWidth: document.documentElement.scrollWidth,
+          rootClientWidth: document.documentElement.clientWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          bodyClientWidth: document.body.clientWidth,
+        }));
+        expect(
+          layout.rootScrollWidth,
+          `${prefix} horizontal overflow: documentElement ${layout.rootScrollWidth}>${layout.rootClientWidth}+1`
+        ).toBeLessThanOrEqual(layout.rootClientWidth + 1);
+        expect(
+          layout.bodyScrollWidth,
+          `${prefix} horizontal overflow: body ${layout.bodyScrollWidth}>${layout.bodyClientWidth}+1`
+        ).toBeLessThanOrEqual(layout.bodyClientWidth + 1);
+      });
     }
 
     // Trigger every lazy image and require complete, dimensions and decode success.
-    const brokenImages = await findBrokenImages(page, testInfo, pageCase.path);
-    expect(brokenImages, brokenImages.join('\n')).toEqual([]);
+    await progressStep(testInfo, pageCase.path, 'image checks', async () => {
+      const brokenImages = await findBrokenImages(page, testInfo, pageCase.path);
+      expect(brokenImages, brokenImages.join('\n')).toEqual([]);
+    });
 
     // Validate browser video metadata and decoded dimensions without asserting autoplay.
-    const brokenVideos = await findBrokenVideos(page, testInfo, pageCase.path);
-    expect(brokenVideos, brokenVideos.join('\n')).toEqual([]);
+    await progressStep(testInfo, pageCase.path, 'video checks', async () => {
+      const brokenVideos = await findBrokenVideos(page, testInfo, pageCase.path);
+      expect(brokenVideos, brokenVideos.join('\n')).toEqual([]);
+    });
 
     // Direct status and MIME requests intentionally run on only one desktop project.
     if (testInfo.project.name === mediaAuditProject) {
-      const mediaEntries = await collectInternalMedia(page);
-      const directFailures = await auditMediaUrls(request, mediaEntries, testInfo, pageCase.path);
-      expect(directFailures, directFailures.join('\n')).toEqual([]);
+      await progressStep(testInfo, pageCase.path, 'media audit', async () => {
+        const mediaEntries = await collectInternalMedia(page);
+        const directFailures = await auditMediaUrls(request, mediaEntries, testInfo, pageCase.path);
+        expect(directFailures, directFailures.join('\n')).toEqual([]);
+      });
     }
 
     // Finish with the existing runtime gates after all lazy media requests have fired.
@@ -336,118 +394,134 @@ test('primary navigation works', async ({ page }, testInfo) => {
 
   // Start each destination from a clean home state, which also restores a mobile menu.
   for (const path of navigationPaths.filter(path => path !== '/')) {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    if (isMobile) {
-      await page.locator('[data-menu-toggle]').click();
-      await expect(page.locator('nav[data-navigation]')).toHaveClass(/is-open/);
-    }
-    await page.locator(`nav[data-navigation] a[href="${path}"]`).click();
-    await expect(page).toHaveURL(new RegExp(`${path.replaceAll('/', '\\/')}$`));
+    await progressStep(testInfo, path, 'navigation/menu', async () => {
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      if (isMobile) {
+        await page.locator('[data-menu-toggle]').click();
+        await expect(page.locator('nav[data-navigation]')).toHaveClass(/is-open/);
+      }
+      await page.locator(`nav[data-navigation] a[href="${path}"]`).click();
+      await expect(page).toHaveURL(new RegExp(`${path.replaceAll('/', '\\/')}$`));
+    });
   }
 
   // Return mobile projects to the initial closed-menu home state after navigation.
   if (isMobile) {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('nav[data-navigation]')).not.toHaveClass(/is-open/);
+    await progressStep(testInfo, '/', 'navigation/menu reset', async () => {
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('nav[data-navigation]')).not.toHaveClass(/is-open/);
+    });
   }
 });
 
 // Open one closed FAQ disclosure and verify the native details state really changes.
 test('FAQ details opens', async ({ page }, testInfo) => {
   const prefix = diagnosticPrefix(testInfo, '/faq/');
-  await page.goto('/faq/', { waitUntil: 'domcontentloaded' });
-  const closedDetails = page.locator('details:not([open])').first();
-  await expect(closedDetails, `${prefix} no closed FAQ details found`).toBeAttached();
-  await closedDetails.locator('summary').click();
-  await expect(closedDetails, `${prefix} FAQ details did not open`).toHaveAttribute('open', '');
+  await progressStep(testInfo, '/faq/', 'navigation', () =>
+    page.goto('/faq/', { waitUntil: 'domcontentloaded' })
+  );
+  await progressStep(testInfo, '/faq/', 'FAQ', async () => {
+    const closedDetails = page.locator('details:not([open])').first();
+    await expect(closedDetails, `${prefix} no closed FAQ details found`).toBeAttached();
+    await closedDetails.locator('summary').click();
+    await expect(closedDetails, `${prefix} FAQ details did not open`).toHaveAttribute('open', '');
+  });
 });
 
 // Open the first available gallery item, validate its PhotoSwipe image, then close it.
 test('PhotoSwipe opens and loads its first image', async ({ page }, testInfo) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await progressStep(testInfo, '/', 'navigation', () =>
+    page.goto('/', { waitUntil: 'domcontentloaded' })
+  );
   const prefix = diagnosticPrefix(testInfo, '/');
-  const opener = page.locator('[data-lightbox]').first();
-  await opener.scrollIntoViewIfNeeded();
-  await opener.click();
-  const lightbox = page.locator('.pswp--open');
-  await expect(lightbox, `${prefix} PhotoSwipe did not open`).toBeVisible();
-  const image = lightbox.locator('.pswp__img').first();
-  await expect(image, `${prefix} PhotoSwipe image missing`).toBeVisible();
-  const decoded = await image.evaluate(async element => {
-    if (typeof element.decode === 'function') await element.decode();
-    return { url: element.currentSrc || element.src, width: element.naturalWidth, height: element.naturalHeight };
+  await progressStep(testInfo, '/', 'PhotoSwipe', async () => {
+    const opener = page.locator('[data-lightbox]').first();
+    await opener.scrollIntoViewIfNeeded();
+    await opener.click();
+    const lightbox = page.locator('.pswp--open');
+    await expect(lightbox, `${prefix} PhotoSwipe did not open`).toBeVisible();
+    const image = lightbox.locator('.pswp__img').first();
+    await expect(image, `${prefix} PhotoSwipe image missing`).toBeVisible();
+    const decoded = await image.evaluate(async element => {
+      if (typeof element.decode === 'function') await element.decode();
+      return { url: element.currentSrc || element.src, width: element.naturalWidth, height: element.naturalHeight };
+    });
+    expect(decoded.width, `${prefix} PhotoSwipe broken image: ${decoded.url} naturalWidth=0`).toBeGreaterThan(0);
+    expect(decoded.height, `${prefix} PhotoSwipe broken image: ${decoded.url} naturalHeight=0`).toBeGreaterThan(0);
+    await lightbox.locator('.pswp__button--close').click();
+    await expect(lightbox).toHaveCount(0);
   });
-  expect(decoded.width, `${prefix} PhotoSwipe broken image: ${decoded.url} naturalWidth=0`).toBeGreaterThan(0);
-  expect(decoded.height, `${prefix} PhotoSwipe broken image: ${decoded.url} naturalHeight=0`).toBeGreaterThan(0);
-  await lightbox.locator('.pswp__button--close').click();
-  await expect(lightbox).toHaveCount(0);
 });
 
 // Keep the existing dialog geometry regression test on every mobile project.
 test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) => {
   test.skip(testInfo.project.use.isMobile !== true, 'This check belongs to every mobile project.');
   const prefix = diagnosticPrefix(testInfo, '/');
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.locator('[data-menu-toggle]').click();
-  await expect(page.locator('nav[data-navigation]')).toHaveClass(/is-open/);
-  await page.locator('.nav__contact').click();
+  await progressStep(testInfo, '/', 'navigation', () =>
+    page.goto('/', { waitUntil: 'domcontentloaded' })
+  );
+  await progressStep(testInfo, '/', 'contact dialog', async () => {
+    await page.locator('[data-menu-toggle]').click();
+    await expect(page.locator('nav[data-navigation]')).toHaveClass(/is-open/);
+    await page.locator('.nav__contact').click();
 
-  const dialog = page.locator('[data-contact-dialog]');
-  const shell = page.locator('.contact-dialog__shell');
-  const firstInput = page.locator('.contact-dialog input').first();
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toHaveClass(/is-open/);
-  await expect(shell).toBeVisible();
-  await page.waitForTimeout(550);
+    const dialog = page.locator('[data-contact-dialog]');
+    const shell = page.locator('.contact-dialog__shell');
+    const firstInput = page.locator('.contact-dialog input').first();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveClass(/is-open/);
+    await expect(shell).toBeVisible();
+    await page.waitForTimeout(550);
 
-  // Read all nested geometry in one browser evaluation for a consistent snapshot.
-  const readState = () => page.evaluate(() => {
-    const dialogElement = document.querySelector('[data-contact-dialog]');
-    const shellElement = document.querySelector('.contact-dialog__shell');
-    const formElement = document.querySelector('.contact-form');
-    const inputElement = document.querySelector('.contact-dialog input');
-    const dialogRect = dialogElement.getBoundingClientRect();
-    const shellRect = shellElement.getBoundingClientRect();
-    const formRect = formElement.getBoundingClientRect();
-    return {
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      dialog: { left: dialogRect.left, top: dialogRect.top, right: dialogRect.right, bottom: dialogRect.bottom },
-      shell: { left: shellRect.left, top: shellRect.top, right: shellRect.right, bottom: shellRect.bottom },
-      form: { left: formRect.left, top: formRect.top, right: formRect.right, bottom: formRect.bottom },
-      rootOverflow: getComputedStyle(document.documentElement).overflow,
-      dialogOverflowY: getComputedStyle(dialogElement).overflowY,
-      shellTransform: getComputedStyle(shellElement).transform,
-      inputFontSize: Number.parseFloat(getComputedStyle(inputElement).fontSize),
+    // Read all nested geometry in one browser evaluation for a consistent snapshot.
+    const readState = () => page.evaluate(() => {
+      const dialogElement = document.querySelector('[data-contact-dialog]');
+      const shellElement = document.querySelector('.contact-dialog__shell');
+      const formElement = document.querySelector('.contact-form');
+      const inputElement = document.querySelector('.contact-dialog input');
+      const dialogRect = dialogElement.getBoundingClientRect();
+      const shellRect = shellElement.getBoundingClientRect();
+      const formRect = formElement.getBoundingClientRect();
+      return {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        dialog: { left: dialogRect.left, top: dialogRect.top, right: dialogRect.right, bottom: dialogRect.bottom },
+        shell: { left: shellRect.left, top: shellRect.top, right: shellRect.right, bottom: shellRect.bottom },
+        form: { left: formRect.left, top: formRect.top, right: formRect.right, bottom: formRect.bottom },
+        rootOverflow: getComputedStyle(document.documentElement).overflow,
+        dialogOverflowY: getComputedStyle(dialogElement).overflowY,
+        shellTransform: getComputedStyle(shellElement).transform,
+        inputFontSize: Number.parseFloat(getComputedStyle(inputElement).fontSize),
+      };
+    });
+
+    // Assert dialog, shell and form containment both before and after focusing an input.
+    const assertState = state => {
+      const tolerance = 1;
+      expect(state.dialog.left, `${prefix} dialog left outside viewport`).toBeGreaterThanOrEqual(-tolerance);
+      expect(state.dialog.top, `${prefix} dialog top outside viewport`).toBeGreaterThanOrEqual(-tolerance);
+      expect(state.dialog.right, `${prefix} dialog right outside viewport`).toBeLessThanOrEqual(state.viewportWidth + tolerance);
+      expect(state.dialog.bottom, `${prefix} dialog bottom outside viewport`).toBeLessThanOrEqual(state.viewportHeight + tolerance);
+      expect(state.shell.left, `${prefix} shell left outside dialog`).toBeGreaterThanOrEqual(state.dialog.left - tolerance);
+      expect(state.shell.top, `${prefix} shell top outside dialog`).toBeGreaterThanOrEqual(state.dialog.top - tolerance);
+      expect(state.shell.right, `${prefix} shell right outside dialog`).toBeLessThanOrEqual(state.dialog.right + tolerance);
+      expect(state.shell.bottom, `${prefix} shell bottom outside dialog`).toBeLessThanOrEqual(state.dialog.bottom + tolerance);
+      expect(state.form.left, `${prefix} form left outside shell`).toBeGreaterThanOrEqual(state.shell.left - tolerance);
+      expect(state.form.top, `${prefix} form top outside shell`).toBeGreaterThanOrEqual(state.shell.top - tolerance);
+      expect(state.form.right, `${prefix} form right outside shell`).toBeLessThanOrEqual(state.shell.right + tolerance);
+      expect(state.form.bottom, `${prefix} form bottom outside shell`).toBeLessThanOrEqual(state.shell.bottom + tolerance);
     };
+
+    const beforeFocus = await readState();
+    assertState(beforeFocus);
+    expect(beforeFocus.rootOverflow, `${prefix} unexpected root scroll lock`).not.toBe('hidden');
+    expect(beforeFocus.dialogOverflowY, `${prefix} dialog does not own vertical scrolling`).toBe('auto');
+    expect(beforeFocus.shellTransform, `${prefix} translated mobile dialog shell`).toBe('none');
+    expect(beforeFocus.inputFontSize, `${prefix} input font can trigger iOS zoom`).toBeGreaterThanOrEqual(16);
+    await firstInput.click();
+    await page.waitForTimeout(150);
+    assertState(await readState());
   });
-
-  // Assert dialog, shell and form containment both before and after focusing an input.
-  const assertState = state => {
-    const tolerance = 1;
-    expect(state.dialog.left, `${prefix} dialog left outside viewport`).toBeGreaterThanOrEqual(-tolerance);
-    expect(state.dialog.top, `${prefix} dialog top outside viewport`).toBeGreaterThanOrEqual(-tolerance);
-    expect(state.dialog.right, `${prefix} dialog right outside viewport`).toBeLessThanOrEqual(state.viewportWidth + tolerance);
-    expect(state.dialog.bottom, `${prefix} dialog bottom outside viewport`).toBeLessThanOrEqual(state.viewportHeight + tolerance);
-    expect(state.shell.left, `${prefix} shell left outside dialog`).toBeGreaterThanOrEqual(state.dialog.left - tolerance);
-    expect(state.shell.top, `${prefix} shell top outside dialog`).toBeGreaterThanOrEqual(state.dialog.top - tolerance);
-    expect(state.shell.right, `${prefix} shell right outside dialog`).toBeLessThanOrEqual(state.dialog.right + tolerance);
-    expect(state.shell.bottom, `${prefix} shell bottom outside dialog`).toBeLessThanOrEqual(state.dialog.bottom + tolerance);
-    expect(state.form.left, `${prefix} form left outside shell`).toBeGreaterThanOrEqual(state.shell.left - tolerance);
-    expect(state.form.top, `${prefix} form top outside shell`).toBeGreaterThanOrEqual(state.shell.top - tolerance);
-    expect(state.form.right, `${prefix} form right outside shell`).toBeLessThanOrEqual(state.shell.right + tolerance);
-    expect(state.form.bottom, `${prefix} form bottom outside shell`).toBeLessThanOrEqual(state.shell.bottom + tolerance);
-  };
-
-  const beforeFocus = await readState();
-  assertState(beforeFocus);
-  expect(beforeFocus.rootOverflow, `${prefix} unexpected root scroll lock`).not.toBe('hidden');
-  expect(beforeFocus.dialogOverflowY, `${prefix} dialog does not own vertical scrolling`).toBe('auto');
-  expect(beforeFocus.shellTransform, `${prefix} translated mobile dialog shell`).toBe('none');
-  expect(beforeFocus.inputFontSize, `${prefix} input font can trigger iOS zoom`).toBeGreaterThanOrEqual(16);
-  await firstInput.click();
-  await page.waitForTimeout(150);
-  assertState(await readState());
 });
 
 // Diagnose transport timing and browser decode for the three shell photographs once.
@@ -457,41 +531,43 @@ test('shell photographs load and decode', async ({ page, request }, testInfo) =>
 
   // Report every file independently while retaining exact status, headers and duration.
   for (const imagePath of shellImagePaths) {
-    const url = new URL(imagePath, 'https://stage.btsys.ru').href;
-    const startedAt = Date.now();
-    const response = await request.get(url, { failOnStatusCode: false });
-    const elapsedMs = Date.now() - startedAt;
-    const contentType = response.headers()['content-type'] || '<missing>';
-    const contentLength = response.headers()['content-length'] || '<missing>';
-    const transport = `URL=${url} status=${response.status()} Content-Type=${contentType} ` +
-      `Content-Length=${contentLength} loadMs=${elapsedMs}`;
-    expect(response.status(), `${prefix} shell image HTTP failure: ${transport}`).toBe(200);
-    expect(contentType.toLowerCase(), `${prefix} shell image MIME failure: ${transport}`).toMatch(/^image\//);
+    await progressStep(testInfo, '/', `image checks: ${imagePath}`, async () => {
+      const url = new URL(imagePath, 'https://stage.btsys.ru').href;
+      const startedAt = Date.now();
+      const response = await request.get(url, { failOnStatusCode: false });
+      const elapsedMs = Date.now() - startedAt;
+      const contentType = response.headers()['content-type'] || '<missing>';
+      const contentLength = response.headers()['content-length'] || '<missing>';
+      const transport = `URL=${url} status=${response.status()} Content-Type=${contentType} ` +
+        `Content-Length=${contentLength} loadMs=${elapsedMs}`;
+      expect(response.status(), `${prefix} shell image HTTP failure: ${transport}`).toBe(200);
+      expect(contentType.toLowerCase(), `${prefix} shell image MIME failure: ${transport}`).toMatch(/^image\//);
 
-    // Create an actual browser image so HTTP success alone cannot hide decode corruption.
-    const decoded = await page.evaluate(async resourceUrl => {
-      const image = new Image();
-      image.src = resourceUrl;
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('browser load timeout after 10000ms')), 10000);
-        image.addEventListener('load', () => {
-          clearTimeout(timer);
-          resolve();
-        }, { once: true });
-        image.addEventListener('error', () => {
-          clearTimeout(timer);
-          reject(new Error('browser image load error'));
-        }, { once: true });
-      });
-      if (typeof image.decode === 'function') await image.decode();
-      return { complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight };
-    }, url).catch(error => ({ error: error.message, complete: false, naturalWidth: 0, naturalHeight: 0 }));
-    const browserDiagnostic = `${transport} browserDecode=${decoded.error || 'ok'} ` +
-      `dimensions=${decoded.naturalWidth}x${decoded.naturalHeight}`;
-    console.log(`${prefix} shell image diagnostic: ${browserDiagnostic}`);
-    expect(decoded.error, `${prefix} shell image decode failure: ${browserDiagnostic}`).toBeUndefined();
-    expect(decoded.complete, `${prefix} shell image incomplete: ${browserDiagnostic}`).toBe(true);
-    expect(decoded.naturalWidth, `${prefix} shell image width failure: ${browserDiagnostic}`).toBeGreaterThan(0);
-    expect(decoded.naturalHeight, `${prefix} shell image height failure: ${browserDiagnostic}`).toBeGreaterThan(0);
+      // Create an actual browser image so HTTP success alone cannot hide decode corruption.
+      const decoded = await page.evaluate(async resourceUrl => {
+        const image = new Image();
+        image.src = resourceUrl;
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('browser load timeout after 10000ms')), 10000);
+          image.addEventListener('load', () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+          image.addEventListener('error', () => {
+            clearTimeout(timer);
+            reject(new Error('browser image load error'));
+          }, { once: true });
+        });
+        if (typeof image.decode === 'function') await image.decode();
+        return { complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight };
+      }, url).catch(error => ({ error: error.message, complete: false, naturalWidth: 0, naturalHeight: 0 }));
+      const browserDiagnostic = `${transport} browserDecode=${decoded.error || 'ok'} ` +
+        `dimensions=${decoded.naturalWidth}x${decoded.naturalHeight}`;
+      console.log(`${prefix} shell image diagnostic: ${browserDiagnostic}`);
+      expect(decoded.error, `${prefix} shell image decode failure: ${browserDiagnostic}`).toBeUndefined();
+      expect(decoded.complete, `${prefix} shell image incomplete: ${browserDiagnostic}`).toBe(true);
+      expect(decoded.naturalWidth, `${prefix} shell image width failure: ${browserDiagnostic}`).toBeGreaterThan(0);
+      expect(decoded.naturalHeight, `${prefix} shell image height failure: ${browserDiagnostic}`).toBeGreaterThan(0);
+    });
   }
 });
