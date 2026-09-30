@@ -162,7 +162,7 @@ summary:focus-visible {
      адаптируется container query, поэтому аварийное дробление русских слов не нужно. */
   overflow-wrap: normal;
   word-break: normal;
-  hyphens: manual;
+  hyphens: none;
 }
 
 .display-heading span,
