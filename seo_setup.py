@@ -20,7 +20,7 @@ BASE_URL = "https://btsys.ru"
 
 # Изображение, которое сейчас будет использоваться в превью ссылок.
 # Это существующее изображение бака, уже находящееся в опубликованной сборке.
-OG_IMAGE = f"{BASE_URL}/assets/social/bts-og-20261001-v3.jpg"
+OG_IMAGE = "https://stage.btsys.ru/assets/social/bts-og-20261001-v3.jpg"
 
 # Общее название сайта для Open Graph.
 SITE_NAME = "БТС — Бортовые топливные системы"
