@@ -1,0 +1,399 @@
+name: QA device matrix
+
+on:
+  push:
+    branches:
+      - qa-device-matrix-20260930
+    paths:
+      - '.github/workflows/qa-device-matrix.yml'
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run existing staging smoke tests
+        run: npm run test:stage
+
+      - name: Create extended QA matrix
+        shell: bash
+        run: |
+          cat > qa.playwright.config.mjs <<'EOF'
+          import { defineConfig } from '@playwright/test';
+
+          export default defineConfig({
+            testDir: './tests',
+            timeout: 45_000,
+            expect: { timeout: 8_000 },
+            fullyParallel: true,
+            workers: 2,
+            retries: 0,
+            reporter: [['line']],
+            outputDir: 'qa-test-results',
+            use: {
+              baseURL: 'https://stage.btsys.ru',
+              ignoreHTTPSErrors: false,
+              trace: 'retain-on-failure',
+              screenshot: 'only-on-failure',
+              video: 'off',
+            },
+            projects: [
+              { name: 'chrome-1920x1080', use: { browserName: 'chromium', viewport: { width: 1920, height: 1080 } } },
+              { name: 'chrome-1440x900',  use: { browserName: 'chromium', viewport: { width: 1440, height: 900 } } },
+              { name: 'chrome-1366x768',  use: { browserName: 'chromium', viewport: { width: 1366, height: 768 } } },
+              { name: 'chrome-1280x800',  use: { browserName: 'chromium', viewport: { width: 1280, height: 800 } } },
+
+              { name: 'firefox-1440x900', use: { browserName: 'firefox', viewport: { width: 1440, height: 900 } } },
+              { name: 'webkit-1440x900',  use: { browserName: 'webkit', viewport: { width: 1440, height: 900 } } },
+
+              { name: 'tablet-1366x1024', use: { browserName: 'chromium', viewport: { width: 1366, height: 1024 }, hasTouch: true } },
+              { name: 'tablet-1024x1366', use: { browserName: 'chromium', viewport: { width: 1024, height: 1366 }, hasTouch: true } },
+              { name: 'tablet-1024x768',  use: { browserName: 'chromium', viewport: { width: 1024, height: 768 }, hasTouch: true } },
+              { name: 'tablet-768x1024',  use: { browserName: 'chromium', viewport: { width: 768, height: 1024 }, hasTouch: true } },
+
+              { name: 'bp-767x900',  use: { browserName: 'chromium', viewport: { width: 767, height: 900 } } },
+              { name: 'bp-768x900',  use: { browserName: 'chromium', viewport: { width: 768, height: 900 } } },
+              { name: 'bp-1023x900', use: { browserName: 'chromium', viewport: { width: 1023, height: 900 } } },
+              { name: 'bp-1024x900', use: { browserName: 'chromium', viewport: { width: 1024, height: 900 } } },
+
+              {
+                name: 'android-360x800',
+                use: {
+                  browserName: 'chromium',
+                  viewport: { width: 360, height: 800 },
+                  isMobile: true,
+                  hasTouch: true,
+                  deviceScaleFactor: 3,
+                  userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/145.0.0.0 Mobile Safari/537.36',
+                },
+              },
+              {
+                name: 'android-384x854',
+                use: {
+                  browserName: 'chromium',
+                  viewport: { width: 384, height: 854 },
+                  isMobile: true,
+                  hasTouch: true,
+                  deviceScaleFactor: 3,
+                  userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/145.0.0.0 Mobile Safari/537.36',
+                },
+              },
+              {
+                name: 'android-412x915',
+                use: {
+                  browserName: 'chromium',
+                  viewport: { width: 412, height: 915 },
+                  isMobile: true,
+                  hasTouch: true,
+                  deviceScaleFactor: 2.625,
+                  userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/145.0.0.0 Mobile Safari/537.36',
+                },
+              },
+
+              {
+                name: 'iphone-375x667-webkit',
+                use: {
+                  browserName: 'webkit',
+                  viewport: { width: 375, height: 667 },
+                  isMobile: true,
+                  hasTouch: true,
+                  deviceScaleFactor: 2,
+                  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+                },
+              },
+              {
+                name: 'iphone-390x844-webkit',
+                use: {
+                  browserName: 'webkit',
+                  viewport: { width: 390, height: 844 },
+                  isMobile: true,
+                  hasTouch: true,
+                  deviceScaleFactor: 3,
+                  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+                },
+              },
+              {
+                name: 'iphone-393x852-webkit',
+                use: {
+                  browserName: 'webkit',
+                  viewport: { width: 393, height: 852 },
+                  isMobile: true,
+                  hasTouch: true,
+                  deviceScaleFactor: 3,
+                  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+                },
+              },
+              {
+                name: 'iphone-430x932-webkit',
+                use: {
+                  browserName: 'webkit',
+                  viewport: { width: 430, height: 932 },
+                  isMobile: true,
+                  hasTouch: true,
+                  deviceScaleFactor: 3,
+                  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+                },
+              },
+            ],
+          });
+          EOF
+
+          cat > tests/qa-device-matrix.spec.mjs <<'EOF'
+          import { test, expect } from '@playwright/test';
+
+          const pages = [
+            { name: 'home', path: '/' },
+            { name: 'products', path: '/products/' },
+            { name: 'faq', path: '/faq/' },
+            { name: 'about', path: '/about/' },
+            { name: 'contacts', path: '/contacts/' },
+          ];
+
+          const criticalTypes = new Set(['stylesheet', 'script', 'image', 'media']);
+
+          function sameStageOrigin(url) {
+            try {
+              return new URL(url).origin === 'https://stage.btsys.ru';
+            } catch {
+              return false;
+            }
+          }
+
+          function watchPage(page) {
+            const failedRequests = [];
+            const badResponses = [];
+            const pageErrors = [];
+
+            page.on('pageerror', error => pageErrors.push(error.message));
+
+            page.on('requestfailed', request => {
+              if (criticalTypes.has(request.resourceType()) && sameStageOrigin(request.url())) {
+                failedRequests.push(
+                  request.resourceType() + ' ' + request.url() + ' :: ' +
+                  (request.failure()?.errorText || 'request failed')
+                );
+              }
+            });
+
+            page.on('response', response => {
+              const type = response.request().resourceType();
+              if (
+                criticalTypes.has(type) &&
+                sameStageOrigin(response.url()) &&
+                response.status() >= 400
+              ) {
+                badResponses.push(response.status() + ' ' + type + ' ' + response.url());
+              }
+            });
+
+            return { failedRequests, badResponses, pageErrors };
+          }
+
+          async function decodeAllImages(page) {
+            const images = page.locator('img');
+            const count = await images.count();
+            const broken = [];
+
+            for (let i = 0; i < count; i += 1) {
+              const image = images.nth(i);
+              await image.scrollIntoViewIfNeeded();
+
+              const result = await image.evaluate(async element => {
+                const timeout = new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error('decode timeout')), 12_000)
+                );
+
+                try {
+                  if (!element.complete || element.naturalWidth === 0) {
+                    await Promise.race([
+                      new Promise((resolve, reject) => {
+                        element.addEventListener('load', resolve, { once: true });
+                        element.addEventListener('error', () => reject(new Error('load error')), { once: true });
+                      }),
+                      timeout,
+                    ]);
+                  }
+
+                  if (typeof element.decode === 'function') {
+                    await Promise.race([element.decode(), timeout]);
+                  }
+
+                  return {
+                    ok: element.complete && element.naturalWidth > 0 && element.naturalHeight > 0,
+                    src: element.currentSrc || element.src || element.alt || '<unknown>',
+                    naturalWidth: element.naturalWidth,
+                    naturalHeight: element.naturalHeight,
+                  };
+                } catch (error) {
+                  return {
+                    ok: false,
+                    src: element.currentSrc || element.src || element.alt || '<unknown>',
+                    error: String(error),
+                    naturalWidth: element.naturalWidth,
+                    naturalHeight: element.naturalHeight,
+                  };
+                }
+              });
+
+              if (!result.ok) broken.push(result);
+            }
+
+            return broken;
+          }
+
+          async function collectReferencedMedia(page) {
+            return page.evaluate(() => {
+              const urls = new Set();
+
+              const add = value => {
+                if (!value) return;
+                try {
+                  urls.add(new URL(value, location.href).href);
+                } catch {}
+              };
+
+              document.querySelectorAll('img').forEach(el => {
+                add(el.currentSrc);
+                add(el.getAttribute('src'));
+              });
+
+              document.querySelectorAll('video').forEach(el => {
+                add(el.getAttribute('src'));
+                add(el.getAttribute('poster'));
+                el.querySelectorAll('source').forEach(source => add(source.getAttribute('src')));
+              });
+
+              document.querySelectorAll('[data-lightbox-src]').forEach(el => {
+                add(el.getAttribute('data-lightbox-src'));
+              });
+
+              document.querySelectorAll('link[rel~="icon"], link[rel="apple-touch-icon"]').forEach(el => {
+                add(el.getAttribute('href'));
+              });
+
+              return [...urls].filter(url => new URL(url).origin === location.origin);
+            });
+          }
+
+          for (const pageCase of pages) {
+            test(pageCase.name + ' layout and media load', async ({ page, request }, testInfo) => {
+              const runtime = watchPage(page);
+
+              const response = await page.goto(pageCase.path, { waitUntil: 'domcontentloaded' });
+              expect(response, 'Navigation returned no response').not.toBeNull();
+              expect(response.status(), 'Unexpected page HTTP status').toBe(200);
+
+              await page.waitForTimeout(600);
+
+              const overflow = await page.evaluate(() => ({
+                html: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                body: document.body.scrollWidth - document.body.clientWidth,
+              }));
+
+              expect(
+                Math.max(overflow.html, overflow.body),
+                'Horizontal overflow in CSS pixels'
+              ).toBeLessThanOrEqual(1);
+
+              const brokenImages = await decodeAllImages(page);
+              expect(
+                brokenImages,
+                'Images failed to load/decode: ' + JSON.stringify(brokenImages, null, 2)
+              ).toEqual([]);
+
+              expect(
+                runtime.pageErrors,
+                'JavaScript errors: ' + runtime.pageErrors.join(' | ')
+              ).toEqual([]);
+
+              expect(
+                runtime.failedRequests,
+                'Failed critical requests: ' + runtime.failedRequests.join(' | ')
+              ).toEqual([]);
+
+              expect(
+                runtime.badResponses,
+                'Bad critical responses: ' + runtime.badResponses.join(' | ')
+              ).toEqual([]);
+
+              // Do a direct server-side asset check once, not for every emulated viewport.
+              if (testInfo.project.name === 'chrome-1440x900') {
+                const assets = await collectReferencedMedia(page);
+
+                const failures = [];
+                for (const assetUrl of assets) {
+                  const assetResponse = await request.head(assetUrl, { timeout: 20_000 });
+                  const contentType = assetResponse.headers()['content-type'] || '';
+
+                  if (!assetResponse.ok()) {
+                    failures.push({
+                      url: assetUrl,
+                      status: assetResponse.status(),
+                      contentType,
+                    });
+                    continue;
+                  }
+
+                  const pathname = new URL(assetUrl).pathname.toLowerCase();
+
+                  if (
+                    /\.(png|jpe?g|webp|gif|svg|ico)$/.test(pathname) &&
+                    !contentType.toLowerCase().startsWith('image/')
+                  ) {
+                    failures.push({
+                      url: assetUrl,
+                      status: assetResponse.status(),
+                      contentType,
+                      error: 'wrong image MIME type',
+                    });
+                  }
+
+                  if (
+                    /\.(mp4|webm)$/.test(pathname) &&
+                    !contentType.toLowerCase().startsWith('video/')
+                  ) {
+                    failures.push({
+                      url: assetUrl,
+                      status: assetResponse.status(),
+                      contentType,
+                      error: 'wrong video MIME type',
+                    });
+                  }
+                }
+
+                expect(
+                  failures,
+                  'Referenced media asset failures: ' + JSON.stringify(failures, null, 2)
+                ).toEqual([]);
+              }
+            });
+          }
+          EOF
+
+      - name: Run extended device and media matrix
+        run: npx playwright test tests/qa-device-matrix.spec.mjs --config=qa.playwright.config.mjs
+
+      - name: Upload QA failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-device-matrix-results
+          path: |
+            qa-test-results
+            test-results
+          if-no-files-found: ignore
+          retention-days: 7
