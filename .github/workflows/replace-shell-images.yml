@@ -22,7 +22,7 @@ jobs:
       - name: Install image tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y libheif-examples webp imagemagick
+          sudo apt-get install -y libheif-examples libheif-plugin-libde265 webp imagemagick
 
       - name: Convert and replace shell images
         shell: bash
