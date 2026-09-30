@@ -1,0 +1,104 @@
+name: Temporary responsive media build
+
+on:
+  push:
+    branches:
+      - perf-mobile-lighthouse-20260930
+
+permissions:
+  contents: write
+
+jobs:
+  optimize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: perf-mobile-lighthouse-20260930
+          fetch-depth: 0
+
+      - name: Install image tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y webp imagemagick
+
+      - name: Generate responsive media
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          make_webp_variants() {
+            input="$1"
+            output_base="$2"
+            tmp="$(mktemp --suffix=.png)"
+            dwebp "$input" -o "$tmp" >/dev/null 2>&1
+            for width in 480 768 1280; do
+              cwebp -quiet -mt -q 84 -resize "$width" 0 "$tmp" -o "${output_base}-${width}.webp"
+            done
+            rm -f "$tmp"
+          }
+
+          optimize_shell() {
+            input="$1"
+            output_base="${input%.webp}"
+            tmp="$(mktemp --suffix=.png)"
+            dwebp "$input" -o "$tmp" >/dev/null 2>&1
+            width="$(identify -format '%w' "$tmp")"
+            height="$(identify -format '%h' "$tmp")"
+            target_width="$width"
+            if [ "$width" -gt 2048 ]; then target_width=2048; fi
+
+            for w in 480 768 1280; do
+              if [ "$width" -gt "$w" ]; then
+                cwebp -quiet -mt -q 86 -resize "$w" 0 "$tmp" -o "${output_base}-${w}.webp"
+              else
+                cp "$input" "${output_base}-${w}.webp"
+              fi
+            done
+
+            cwebp -quiet -mt -q 88 -resize "$target_width" 0 "$tmp" -o "$input"
+            new_width="$(webpinfo "$input" 2>/dev/null | awk '/Width:/ {print $2; exit}')"
+            new_height="$(webpinfo "$input" 2>/dev/null | awk '/Height:/ {print $2; exit}')"
+            echo "SHELL_DIMENSIONS $input original=${width}x${height} optimized=${new_width}x${new_height}"
+            rm -f "$tmp"
+          }
+
+          make_webp_variants assets/images/hero-tank.webp assets/images/hero-tank
+          make_webp_variants assets/media/product-hero.webp assets/media/product-hero
+
+          cwebp -quiet -mt -q 84 -resize 960 0 assets/media/flexibility-poster.jpg -o assets/media/flexibility-poster-960.webp
+          cwebp -quiet -mt -q 84 -resize 960 0 assets/media/catia-poster.jpg -o assets/media/catia-poster-960.webp
+
+          optimize_shell assets/media/shell-inner.webp
+          optimize_shell assets/media/shell-outer.webp
+          optimize_shell assets/media/shell-edge.webp
+
+          echo "GENERATED_MEDIA"
+          ls -lh             assets/images/hero-tank*.webp             assets/media/product-hero*.webp             assets/media/*poster-960.webp             assets/media/shell-*.webp
+
+      - name: Validate JavaScript
+        run: |
+          node --check assets/main.js
+          node --check assets/btsCloudBackground.js
+
+      - name: Install dependencies and build
+        run: |
+          npm ci
+          npm run build
+          npm run test:stage -- --list
+
+      - name: Commit generated media and dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/images assets/media dist
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit."
+            exit 0
+          fi
+          git commit -m "Generate responsive media and rebuild dist"
+          git push origin HEAD:perf-mobile-lighthouse-20260930
