@@ -597,12 +597,145 @@ a[href^="mailto:"] {
   border-inline-start: var(--component-divider-width) solid var(--component-card-border-color);
 }
 
+/* Сбалансированная MetricRow оставляет крупной цифре собственную эластичную
+   зону, а индекс и подпись выравнивает по общим базовым линиям карточек. */
+[data-pattern~="S-METRICS"][data-variants~="balanced-metrics"] .metric-row--balanced > .c-metric-card {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(var(--ds-space-11), 1fr) auto;
+  gap: var(--ds-space-5);
+  padding: var(--ds-space-6);
+  align-items: center;
+}
+
+[data-pattern~="S-METRICS"][data-variants~="balanced-metrics"] .metric-row--balanced .t-metric {
+  align-self: center;
+  display: block;
+}
+
+[data-pattern~="S-METRICS"][data-variants~="balanced-metrics"] .metric-row--balanced .c-metric-card > p {
+  align-self: end;
+  margin: 0;
+}
+
+/* Итоговая строка является обычным элементом Stack и получает одинаковый
+   системный интервал относительно карточек и следующей композиции. */
+[data-pattern~="S-METRICS"][data-variants~="balanced-metrics"] .metric-content {
+  margin-block-start: var(--ds-space-7);
+  gap: var(--ds-space-6);
+}
+
+[data-pattern~="S-METRICS"][data-variants~="balanced-metrics"] .metric-content > :is(.metric-row, .system-grid, p) {
+  margin: 0;
+}
+
+/* M-WIDE занимает всю выделенную pattern-колонку. Это общее правило снимает
+   legacy-ограничение ширины, не меняя ratio и не привязываясь к PAGE. */
+[data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="media-prominent"] [data-slot="media"][data-media-role="M-WIDE"] {
+  width: 100%;
+}
+
 :where(.p-gallery, [data-pattern~="S-GALLERY"]) [data-slot="items"] {
   display: grid;
   grid-template-columns: repeat(var(--gallery-columns, 3), minmax(0, 1fr));
   gap: var(--component-gap-contiguous);
   border: 0;
   background: transparent;
+}
+
+/* Media-contained использует двенадцатиколоночную системную сетку: основное
+   фото и превью занимают восемь колонок, а модель — шесть. */
+@media (min-width: 768px) {
+  [data-pattern~="S-GALLERY"][data-variants~="media-contained"] > .l-container {
+    display: grid;
+    grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr));
+    column-gap: var(--grid-gap);
+  }
+
+  [data-pattern~="S-GALLERY"][data-variants~="media-contained"] > .l-container > * {
+    grid-column: 1 / -1;
+  }
+
+  [data-pattern~="S-GALLERY"][data-variants~="media-contained"] > .l-container > :is(.c-media--featured, .c-gallery--contained) {
+    grid-column: 1 / 9;
+  }
+
+  [data-pattern~="S-GALLERY"][data-variants~="media-contained"] > .l-container > .c-media--compact {
+    grid-column: 1 / 7;
+  }
+}
+
+/* У карточек с выровненной копией текстовая зона получает системный padding,
+   а заголовок резервирует одинаковую трёхстрочную область перед описанием. */
+[data-pattern~="S-GALLERY"][data-variants~="aligned-card-copy"] .gallery-grid--aligned-copy > .gallery-item {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+[data-pattern~="S-GALLERY"][data-variants~="aligned-card-copy"] .gallery-grid--aligned-copy figcaption {
+  display: grid;
+  grid-template-rows: minmax(var(--ds-space-11), auto) auto;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-6);
+}
+
+[data-pattern~="S-GALLERY"][data-variants~="aligned-card-copy"] .gallery-grid--aligned-copy figcaption :is(h3, p) {
+  margin: 0;
+}
+
+/* MetricPair всегда использует всю ширину items-слота и две равные колонки;
+   mobile-правило конструктора ниже по файлу по-прежнему складывает их в одну. */
+[data-pattern~="S-METRICS"][data-variants~="metric-pair"] .metric-pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Text-gallery-aside — общий вариант EditorialMedia: слева Stack с компактной
+   трёхкадровой Gallery, справа одно крупное медиа равной общей высоты. */
+[data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] [data-slot="layout"] {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: stretch;
+}
+
+[data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] .production-copy {
+  width: 100%;
+  max-width: none;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: var(--ds-space-5);
+}
+
+[data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] .production-copy > p {
+  margin: 0;
+}
+
+[data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] .production-gallery {
+  align-self: end;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+[data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] .production-gallery > [data-slot="media"] {
+  height: auto;
+  min-height: 0;
+  aspect-ratio: var(--media-ratio-square);
+}
+
+[data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] .production-media,
+[data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] .production-media > [data-slot="media"] {
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 767px) {
+  [data-pattern~="S-METRICS"][data-variants~="metric-pair"] .metric-pair,
+  [data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] [data-slot="layout"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-pattern~="S-EDITORIAL-MEDIA"][data-variants~="text-gallery-aside"] .production-gallery {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 :where(.p-specs, [data-pattern~="S-SPECS"]) [data-slot="specs"] {
