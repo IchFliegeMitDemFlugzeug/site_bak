@@ -930,7 +930,7 @@ export function mountBTSCloudBackground(container, userOptions = {}) {
   // На телефоне 24 кадра/с более чем достаточно:
   // облака двигаются очень медленно.
   const targetFPS =
-    mobileLike ? 24 : 30;
+    mobileLike ? 15 : 30;
 
   // Переводим частоту кадров во время между кадрами.
   const frameInterval =
@@ -939,13 +939,18 @@ export function mountBTSCloudBackground(container, userOptions = {}) {
   // На Retina-телефонах нет смысла безусловно считать DPR=3–4.
   // DPR=2 для настолько мягкого изображения визуально практически неотличим.
   const maxDPR =
-    mobileLike ? 2.0 : 2.0;
+    mobileLike ? 1.5 : 2.0;
 
   // Ограничиваем количество реально рассчитываемых пикселей.
   // Это главный предохранитель от перегрева мобильного GPU.
   const pixelBudget =
-    mobileLike ? 1_600_000 : 3_200_000;
+    mobileLike ? 900_000 : 3_200_000;
 
+
+  // На мобильном первый экран сначала получает один статичный красивый кадр.
+  // Непрерывную анимацию включаем только после полной загрузки и ближайшего idle-периода,
+  // чтобы WebGL не конкурировал с текстом, изображением Hero и шрифтами.
+  let animationReady = !mobileLike;
 
   // Текущее накопленное время анимации.
   let elapsed = 0;
@@ -1190,6 +1195,7 @@ export function mountBTSCloudBackground(container, userOptions = {}) {
     // вкладка активна,
     // пользователь не попросил уменьшить анимации.
     const shouldRun =
+      animationReady &&
       isIntersecting &&
       !document.hidden &&
       !reducedMotion.matches;
@@ -1283,8 +1289,31 @@ export function mountBTSCloudBackground(container, userOptions = {}) {
   // чтобы Canvas никогда не был пустым при загрузке.
   render();
 
-  // После первого кадра запускаем нормальный режим.
-  updateRunningState();
+  // На desktop запускаем обычную анимацию сразу.
+  // На touch/mobile откладываем непрерывный WebGL до момента, когда загрузка страницы
+  // уже закончена и браузер получил свободное время.
+  if (mobileLike) {
+    const enableMobileAnimation = () => {
+      const startAnimation = () => {
+        animationReady = true;
+        updateRunningState();
+      };
+
+      if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(startAnimation, { timeout: 1800 });
+      } else {
+        window.setTimeout(startAnimation, 800);
+      }
+    };
+
+    if (document.readyState === 'complete') {
+      enableMobileAnimation();
+    } else {
+      window.addEventListener('load', enableMobileAnimation, { once: true });
+    }
+  } else {
+    updateRunningState();
+  }
 
 
   // Функция обновляет только переданные числовые настройки, не пересоздавая Canvas и WebGL-контекст.
