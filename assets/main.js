@@ -447,12 +447,39 @@ contactForm?.addEventListener('submit', async event => {
 /* ВИДЕО И ВНУТРЕННЯЯ НАВИГАЦИЯ ПРОДУКЦИИ                                   */
 /* ========================================================================== */
 
-// Видеоролики запускаются без звука только в видимой области и останавливаются вне неё.
+// Видео не получает src при первом открытии страницы.
+// Это критично для мобильного Safari: даже preload="metadata" может заранее запрашивать
+// сотни килобайт MP4 через Range-запросы и конкурировать с первым экраном.
 const smartVideos = document.querySelectorAll('[data-smart-video]');
-const videoObserver = new IntersectionObserver(entries => {
+
+function ensureSmartVideoSource(video) {
+  if (video.getAttribute('src') || !video.dataset.src) return;
+
+  video.src = video.dataset.src;
+  video.preload = 'metadata';
+  video.load();
+}
+
+// Подготавливаем ролик немного раньше, чем он появится на экране.
+// На первом экране MP4 при этом вообще не запрашиваются.
+const videoPreloadObserver = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) return;
+    ensureSmartVideoSource(entry.target);
+    videoPreloadObserver.unobserve(entry.target);
+  });
+}, {
+  rootMargin: '500px 0px',
+  threshold: .01,
+});
+
+// Воспроизведение остаётся привязанным только к реально видимой области.
+const videoPlaybackObserver = new IntersectionObserver(entries => {
   entries.forEach(entry => {
     const video = entry.target;
+
     if (entry.isIntersecting) {
+      ensureSmartVideoSource(video);
       video.play().catch(() => {});
     } else {
       video.pause();
@@ -460,7 +487,15 @@ const videoObserver = new IntersectionObserver(entries => {
   });
 }, { threshold: .35 });
 
-smartVideos.forEach(video => videoObserver.observe(video));
+smartVideos.forEach(video => {
+  // Если пользователь взаимодействует с роликом раньше observer — источник подключается сразу.
+  const primeVideo = () => ensureSmartVideoSource(video);
+  video.addEventListener('pointerdown', primeVideo, { once: true, passive: true });
+  video.addEventListener('focus', primeVideo, { once: true });
+
+  videoPreloadObserver.observe(video);
+  videoPlaybackObserver.observe(video);
+});
 
 // Компактная навигация продукции появляется после первого смыслового экрана.
 const productSubnav = document.querySelector('[data-product-subnav]');
