@@ -358,7 +358,38 @@ test(
   }
 );
 
-// Keep the three focused interaction regressions on the two primary phones only.
+// Guard the mobile first-load optimization: off-screen MP4 files must not compete with Hero resources.
+test('mobile first screen defers video downloads', { tag: '@mobile-interaction' }, async ({ page }, testInfo) => {
+  const mp4Requests = [];
+  page.on('request', request => {
+    if (/\.mp4(?:$|\?)/i.test(request.url())) mp4Requests.push(request.url());
+  });
+
+  await progressStep(testInfo, '/', 'mobile first-load video deferral', async () => {
+    await page.goto('/', { waitUntil: 'load' });
+    await expect(page.locator('.hero')).toBeVisible();
+
+    // Give IntersectionObserver and the browser two paint cycles without introducing a time-based sleep.
+    await page.evaluate(() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+
+    expect(mp4Requests, `unexpected MP4 requests before scrolling:\n${mp4Requests.join('\n')}`).toEqual([]);
+
+    const videos = page.locator('video[data-smart-video]');
+    const count = await videos.count();
+    expect(count).toBeGreaterThan(0);
+
+    for (let index = 0; index < count; index += 1) {
+      const video = videos.nth(index);
+      await expect(video).not.toHaveAttribute('src', /.+/);
+      await expect(video).toHaveAttribute('data-src', /\.mp4$/);
+      await expect(video).toHaveAttribute('preload', 'none');
+    }
+  });
+});
+
+// Keep the focused interaction regressions on the two primary phones only.
 test('FAQ details opens', { tag: '@mobile-interaction' }, async ({ page }, testInfo) => {
   const prefix = diagnosticPrefix(testInfo, '/faq/');
   await progressStep(testInfo, '/faq/', 'navigation', () => page.goto('/faq/', { waitUntil: 'domcontentloaded' }));
