@@ -20,7 +20,7 @@ BASE_URL = "https://btsys.ru"
 
 # Изображение, которое сейчас будет использоваться в превью ссылок.
 # Это существующее изображение бака, уже находящееся в опубликованной сборке.
-OG_IMAGE = f"{BASE_URL}/assets/social/bts-og-20261001.png"
+OG_IMAGE = f"{BASE_URL}/assets/social/bts-og-20261001.jpg"
 
 # Общее название сайта для Open Graph.
 SITE_NAME = "БТС — Бортовые топливные системы"
@@ -101,7 +101,7 @@ def update_html(file_path: Path, canonical_url: str) -> None:
   <meta property="og:url" content="{canonical_url}">
   <link rel="image_src" href="{OG_IMAGE}">\n  <meta property="og:image" content="{OG_IMAGE}">\n  <meta property="og:image:url" content="{OG_IMAGE}">
   <meta property="og:image:secure_url" content="{OG_IMAGE}">
-  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:type" content="image/jpeg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="БТС — мягкие топливные баки для БПЛА">
