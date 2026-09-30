@@ -231,7 +231,7 @@ if (PhotoSwipeCore && PhotoSwipeLightboxClass && lightboxOpeners.length) {
 
   lightboxOpeners.forEach((opener, openerIndex) => {
     const sourceImage = opener.querySelector('img');
-    const source = opener.dataset.lightboxSrc || sourceImage?.currentSrc || sourceImage?.src;
+    const source = opener.dataset.lightboxSrc || sourceImage?.src || sourceImage?.currentSrc;
     if (!source || !sourceImage) return;
 
     const blockId = opener.closest('[data-block-id]')?.dataset.blockId || `${currentPage}-UNMAPPED-${openerIndex}`;
