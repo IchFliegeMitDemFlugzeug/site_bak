@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "node build.mjs",
     "test:stage": "playwright test",
+    "test:stage:trace": "playwright test --last-failed --trace on --workers=1",
     "preflight": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/preflight.ps1"
   },
   "displayName": "Бортовые топливные системы",

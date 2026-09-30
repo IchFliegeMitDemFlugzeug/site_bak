@@ -22,9 +22,6 @@ const navigationPaths = ['/', '/products/', '/contacts/', '/faq/', '/about/'];
 // CSS, JavaScript, images and video are the resources that can break the rendered site.
 const criticalResourceTypes = new Set(['stylesheet', 'script', 'image', 'media']);
 
-// Direct resource checks run once, on this representative desktop Chromium project.
-const mediaAuditProject = 'desktop-1440x900-chromium';
-
 // The three high-value shell photographs also receive a dedicated timed diagnostic.
 const shellImagePaths = [
   '/assets/media/shell-inner.webp',
@@ -256,7 +253,9 @@ async function collectInternalMedia(page) {
       add(element.currentSrc || element.src, 'video');
       add(element.poster, 'image');
     });
-    document.querySelectorAll('source[src]').forEach(element => add(element.src, 'video'));
+    document.querySelectorAll('source[src]').forEach(element => {
+      add(element.src, element.parentElement?.tagName === 'PICTURE' ? 'image' : 'video');
+    });
     document.querySelectorAll('[data-lightbox]').forEach(element => {
       add(element.dataset.lightboxSrc, 'image');
       add(element.querySelector('img')?.currentSrc || element.querySelector('img')?.src, 'image');
@@ -269,67 +268,29 @@ async function collectInternalMedia(page) {
   });
 }
 
-// Request HTML media directly once and verify transport status plus declared MIME type.
-async function auditMediaUrls(request, entries, testInfo, pagePath) {
-  const prefix = diagnosticPrefix(testInfo, pagePath);
-  const failures = [];
-
-  // Keep requests sequential to avoid turning the media audit into staging load testing.
-  for (const entry of entries) {
-    try {
-      const response = await request.get(entry.url, { failOnStatusCode: false });
-      const status = response.status();
-      const contentType = response.headers()['content-type'] || '<missing>';
-      const expectedPrefix = entry.kind === 'video' ? 'video/' : 'image/';
-      if (status !== 200 || !contentType.toLowerCase().startsWith(expectedPrefix)) {
-        failures.push(
-          `${prefix} direct media error: URL=${entry.url} status=${status} ` +
-          `Content-Type=${contentType} expected=${expectedPrefix}*`
-        );
-      }
-    } catch (error) {
-      failures.push(`${prefix} direct media requestfailed: URL=${entry.url} reason=${error.message}`);
-    }
-  }
-
-  // Return transport and MIME failures without stopping after the first resource.
-  return failures;
-}
-
-// Preserve the original smoke checks and add layout/media checks for every project.
-for (const pageCase of [...primaryPages, errorPage]) {
-  test(`${pageCase.name} opens correctly`, async ({ page, request }, testInfo) => {
+// Run the full document, layout and browser-media checks once per primary page.
+for (const pageCase of primaryPages) {
+  test(`${pageCase.name} opens correctly`, { tag: '@page-smoke' }, async ({ page }, testInfo) => {
     const prefix = diagnosticPrefix(testInfo, pageCase.path);
     const runtime = watchPage(page, testInfo, pageCase.path);
     const response = await progressStep(testInfo, pageCase.path, 'navigation', () =>
       page.goto(pageCase.path, { waitUntil: 'domcontentloaded' })
     );
 
-    // Navigation must yield a real response with the established 200 or 404 status.
     await progressStep(testInfo, pageCase.path, 'page load', async () => {
       expect(response, `${prefix} navigation returned no HTTP response`).not.toBeNull();
-      expect(response.status(), `${prefix} unexpected page HTTP status URL=${page.url()}`).toBe(pageCase.status);
-
-      // Staging crawler isolation must remain an IIS header, not production HTML.
+      expect(response.status(), `${prefix} unexpected page HTTP status URL=${page.url()}`).toBe(200);
       const robotsHeader = response.headers()['x-robots-tag'] || '';
       expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag noindex`).toContain('noindex');
       expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag nofollow`).toContain('nofollow');
       expect(robotsHeader.toLowerCase(), `${prefix} missing X-Robots-Tag noarchive`).toContain('noarchive');
-
-      // Allow synchronous scripts to mount the navigation before checking the document.
-      await page.waitForTimeout(750);
       expect((await page.title()).trim().length, `${prefix} empty title`).toBeGreaterThan(0);
-
-      // Production pages must not accidentally acquire a deployable meta noindex.
-      if (pageCase.status === 200) {
-        const robotsMetaContent = await page.locator('meta[name="robots"]').evaluateAll(elements =>
-          elements.map(element => element.getAttribute('content') || '')
-        );
-        expect(robotsMetaContent.join(' ').toLowerCase(), `${prefix} production noindex`).not.toContain('noindex');
-      }
+      const robotsMetaContent = await page.locator('meta[name="robots"]').evaluateAll(elements =>
+        elements.map(element => element.getAttribute('content') || '')
+      );
+      expect(robotsMetaContent.join(' ').toLowerCase(), `${prefix} production noindex`).not.toContain('noindex');
     });
 
-    // Preserve attachment and destination checks for the generated global navigation.
     await progressStep(testInfo, pageCase.path, 'navigation/menu', async () => {
       await expect(page.locator('nav[data-navigation]'), `${prefix} navigation missing`).toBeAttached();
       for (const path of navigationPaths) {
@@ -340,86 +301,62 @@ for (const pageCase of [...primaryPages, errorPage]) {
       }
     });
 
-    // All main pages must fit both the root element and body at this exact viewport.
-    if (pageCase.status === 200) {
-      await progressStep(testInfo, pageCase.path, 'horizontal overflow', async () => {
-        const layout = await page.evaluate(() => ({
-          rootScrollWidth: document.documentElement.scrollWidth,
-          rootClientWidth: document.documentElement.clientWidth,
-          bodyScrollWidth: document.body.scrollWidth,
-          bodyClientWidth: document.body.clientWidth,
-        }));
-        expect(
-          layout.rootScrollWidth,
-          `${prefix} horizontal overflow: documentElement ${layout.rootScrollWidth}>${layout.rootClientWidth}+1`
-        ).toBeLessThanOrEqual(layout.rootClientWidth + 1);
-        expect(
-          layout.bodyScrollWidth,
-          `${prefix} horizontal overflow: body ${layout.bodyScrollWidth}>${layout.bodyClientWidth}+1`
-        ).toBeLessThanOrEqual(layout.bodyClientWidth + 1);
-      });
-    }
+    await progressStep(testInfo, pageCase.path, 'horizontal overflow', async () => {
+      const layout = await page.evaluate(() => ({
+        rootScrollWidth: document.documentElement.scrollWidth,
+        rootClientWidth: document.documentElement.clientWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+      }));
+      expect(layout.rootScrollWidth, `${prefix} root horizontal overflow`).toBeLessThanOrEqual(layout.rootClientWidth + 1);
+      expect(layout.bodyScrollWidth, `${prefix} body horizontal overflow`).toBeLessThanOrEqual(layout.bodyClientWidth + 1);
+    });
 
-    // Trigger every lazy image and require complete, dimensions and decode success.
     await progressStep(testInfo, pageCase.path, 'image checks', async () => {
       const brokenImages = await findBrokenImages(page, testInfo, pageCase.path);
       expect(brokenImages, brokenImages.join('\n')).toEqual([]);
     });
-
-    // Validate browser video metadata and decoded dimensions without asserting autoplay.
     await progressStep(testInfo, pageCase.path, 'video checks', async () => {
       const brokenVideos = await findBrokenVideos(page, testInfo, pageCase.path);
       expect(brokenVideos, brokenVideos.join('\n')).toEqual([]);
     });
 
-    // Direct status and MIME requests intentionally run on only one desktop project.
-    if (testInfo.project.name === mediaAuditProject) {
-      await progressStep(testInfo, pageCase.path, 'media audit', async () => {
-        const mediaEntries = await collectInternalMedia(page);
-        const directFailures = await auditMediaUrls(request, mediaEntries, testInfo, pageCase.path);
-        expect(directFailures, directFailures.join('\n')).toEqual([]);
-      });
-    }
-
-    // Finish with the existing runtime gates after all lazy media requests have fired.
     expect(runtime.pageErrors, runtime.pageErrors.join('\n')).toEqual([]);
     expect(runtime.failedRequests, runtime.failedRequests.join('\n')).toEqual([]);
     expect(runtime.badResponses, runtime.badResponses.join('\n')).toEqual([]);
   });
 }
 
-// Exercise real navigation and explicitly cover mobile menu open-state behaviour.
-test('primary navigation works', async ({ page }, testInfo) => {
-  const isMobile = testInfo.project.use.isMobile === true;
-
-  // Start each destination from a clean home state, which also restores a mobile menu.
-  for (const path of navigationPaths.filter(path => path !== '/')) {
-    await progressStep(testInfo, path, 'navigation/menu', async () => {
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
-      if (isMobile) {
-        await page.locator('[data-menu-toggle]').click();
-        await expect(page.locator('nav[data-navigation]')).toHaveClass(/is-open/);
-      }
-      await page.locator(`nav[data-navigation] a[href="${path}"]`).click();
-      await expect(page).toHaveURL(new RegExp(`${path.replaceAll('/', '\\/')}$`));
-    });
+// Exercise both mobile menu navigation and the normal desktop navigation once.
+test(
+  'primary navigation works',
+  { tag: ['@mobile-interaction', '@desktop-only'] },
+  async ({ page }, testInfo) => {
+    const isMobile = testInfo.project.use.isMobile === true;
+    for (const path of navigationPaths.filter(path => path !== '/')) {
+      await progressStep(testInfo, path, 'navigation/menu', async () => {
+        await page.goto('/', { waitUntil: 'domcontentloaded' });
+        if (isMobile) {
+          await page.locator('[data-menu-toggle]').click();
+          await expect(page.locator('nav[data-navigation]')).toHaveClass(/is-open/);
+        }
+        await page.locator(`nav[data-navigation] a[href="${path}"]`).click();
+        await expect(page).toHaveURL(new RegExp(`${path.replaceAll('/', '\\/')}$`));
+      });
+    }
+    if (isMobile) {
+      await progressStep(testInfo, '/', 'navigation/menu reset', async () => {
+        await page.goto('/', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('nav[data-navigation]')).not.toHaveClass(/is-open/);
+      });
+    }
   }
+);
 
-  // Return mobile projects to the initial closed-menu home state after navigation.
-  if (isMobile) {
-    await progressStep(testInfo, '/', 'navigation/menu reset', async () => {
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
-      await expect(page.locator('nav[data-navigation]')).not.toHaveClass(/is-open/);
-    });
-  }
-});
-
-// Open one closed FAQ disclosure and verify the native details state really changes.
-test('FAQ details opens', async ({ page }, testInfo) => {
+// Keep the three focused interaction regressions on the two primary phones only.
+test('FAQ details opens', { tag: '@mobile-interaction' }, async ({ page }, testInfo) => {
   const prefix = diagnosticPrefix(testInfo, '/faq/');
-  await progressStep(testInfo, '/faq/', 'navigation', () =>
-    page.goto('/faq/', { waitUntil: 'domcontentloaded' })
-  );
+  await progressStep(testInfo, '/faq/', 'navigation', () => page.goto('/faq/', { waitUntil: 'domcontentloaded' }));
   await progressStep(testInfo, '/faq/', 'FAQ', async () => {
     const closedDetails = page.locator('details:not([open])').first();
     await expect(closedDetails, `${prefix} no closed FAQ details found`).toBeAttached();
@@ -428,11 +365,8 @@ test('FAQ details opens', async ({ page }, testInfo) => {
   });
 });
 
-// Open the first available gallery item, validate its PhotoSwipe image, then close it.
-test('PhotoSwipe opens and loads its first image', async ({ page }, testInfo) => {
-  await progressStep(testInfo, '/', 'navigation', () =>
-    page.goto('/', { waitUntil: 'domcontentloaded' })
-  );
+test('PhotoSwipe opens and loads its first image', { tag: '@mobile-interaction' }, async ({ page }, testInfo) => {
+  await progressStep(testInfo, '/', 'navigation', () => page.goto('/', { waitUntil: 'domcontentloaded' }));
   const prefix = diagnosticPrefix(testInfo, '/');
   await progressStep(testInfo, '/', 'PhotoSwipe', async () => {
     const opener = page.locator('[data-lightbox]').first();
@@ -446,34 +380,27 @@ test('PhotoSwipe opens and loads its first image', async ({ page }, testInfo) =>
       if (typeof element.decode === 'function') await element.decode();
       return { url: element.currentSrc || element.src, width: element.naturalWidth, height: element.naturalHeight };
     });
-    expect(decoded.width, `${prefix} PhotoSwipe broken image: ${decoded.url} naturalWidth=0`).toBeGreaterThan(0);
-    expect(decoded.height, `${prefix} PhotoSwipe broken image: ${decoded.url} naturalHeight=0`).toBeGreaterThan(0);
+    expect(decoded.width, `${prefix} PhotoSwipe broken image: ${decoded.url}`).toBeGreaterThan(0);
+    expect(decoded.height, `${prefix} PhotoSwipe broken image: ${decoded.url}`).toBeGreaterThan(0);
     await lightbox.locator('.pswp__button--close').click();
     await expect(lightbox).toHaveCount(0);
   });
 });
 
-// Keep the existing dialog geometry regression test on every mobile project.
-test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.use.isMobile !== true, 'This check belongs to every mobile project.');
+test('contact dialog stays inside mobile viewport', { tag: '@mobile-interaction' }, async ({ page }, testInfo) => {
   const prefix = diagnosticPrefix(testInfo, '/');
-  await progressStep(testInfo, '/', 'navigation', () =>
-    page.goto('/', { waitUntil: 'domcontentloaded' })
-  );
+  await progressStep(testInfo, '/', 'navigation', () => page.goto('/', { waitUntil: 'domcontentloaded' }));
   await progressStep(testInfo, '/', 'contact dialog', async () => {
     await page.locator('[data-menu-toggle]').click();
     await expect(page.locator('nav[data-navigation]')).toHaveClass(/is-open/);
     await page.locator('.nav__contact').click();
-
     const dialog = page.locator('[data-contact-dialog]');
     const shell = page.locator('.contact-dialog__shell');
     const firstInput = page.locator('.contact-dialog input').first();
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveClass(/is-open/);
     await expect(shell).toBeVisible();
-    await page.waitForTimeout(550);
 
-    // Read all nested geometry in one browser evaluation for a consistent snapshot.
     const readState = () => page.evaluate(() => {
       const dialogElement = document.querySelector('[data-contact-dialog]');
       const shellElement = document.querySelector('.contact-dialog__shell');
@@ -494,8 +421,6 @@ test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) =
         inputFontSize: Number.parseFloat(getComputedStyle(inputElement).fontSize),
       };
     });
-
-    // Assert dialog, shell and form containment both before and after focusing an input.
     const assertState = state => {
       const tolerance = 1;
       expect(state.dialog.left, `${prefix} dialog left outside viewport`).toBeGreaterThanOrEqual(-tolerance);
@@ -511,63 +436,133 @@ test('contact dialog stays inside mobile viewport', async ({ page }, testInfo) =
       expect(state.form.right, `${prefix} form right outside shell`).toBeLessThanOrEqual(state.shell.right + tolerance);
       expect(state.form.bottom, `${prefix} form bottom outside shell`).toBeLessThanOrEqual(state.shell.bottom + tolerance);
     };
-
     const beforeFocus = await readState();
     assertState(beforeFocus);
     expect(beforeFocus.rootOverflow, `${prefix} unexpected root scroll lock`).not.toBe('hidden');
     expect(beforeFocus.dialogOverflowY, `${prefix} dialog does not own vertical scrolling`).toBe('auto');
     expect(beforeFocus.shellTransform, `${prefix} translated mobile dialog shell`).toBe('none');
-    expect(beforeFocus.inputFontSize, `${prefix} input font can trigger iOS zoom`).toBeGreaterThanOrEqual(16);
+    expect(beforeFocus.inputFontSize, `${prefix} input can trigger iOS zoom`).toBeGreaterThanOrEqual(16);
     await firstInput.click();
-    await page.waitForTimeout(150);
     assertState(await readState());
   });
 });
 
-// Diagnose transport timing and browser decode for the three shell photographs once.
-test('shell photographs load and decode', async ({ page, request }, testInfo) => {
-  test.skip(testInfo.project.name !== mediaAuditProject, 'Shell diagnostics run once on desktop Chromium.');
-  const prefix = diagnosticPrefix(testInfo, '/');
+// Validate the real IIS error response without repeating full-page media work.
+test('real IIS 404 works', { tag: '@desktop-only' }, async ({ page }, testInfo) => {
+  const response = await progressStep(testInfo, errorPage.path, 'navigation', () =>
+    page.goto(errorPage.path, { waitUntil: 'domcontentloaded' })
+  );
+  expect(response).not.toBeNull();
+  expect(response.status()).toBe(404);
+  const robotsHeader = (response.headers()['x-robots-tag'] || '').toLowerCase();
+  expect(robotsHeader).toContain('noindex');
+  expect(robotsHeader).toContain('nofollow');
+  expect(robotsHeader).toContain('noarchive');
+  expect(await page.locator('html').count()).toBe(1);
+  expect((await page.locator('body').innerText()).trim().length).toBeGreaterThan(0);
+});
 
-  // Report every file independently while retaining exact status, headers and duration.
-  for (const imagePath of shellImagePaths) {
-    await progressStep(testInfo, '/', `image checks: ${imagePath}`, async () => {
-      const url = new URL(imagePath, 'https://stage.btsys.ru').href;
-      const startedAt = Date.now();
-      const response = await request.get(url, { failOnStatusCode: false });
-      const elapsedMs = Date.now() - startedAt;
-      const contentType = response.headers()['content-type'] || '<missing>';
-      const contentLength = response.headers()['content-length'] || '<missing>';
-      const transport = `URL=${url} status=${response.status()} Content-Type=${contentType} ` +
-        `Content-Length=${contentLength} loadMs=${elapsedMs}`;
-      expect(response.status(), `${prefix} shell image HTTP failure: ${transport}`).toBe(200);
-      expect(contentType.toLowerCase(), `${prefix} shell image MIME failure: ${transport}`).toMatch(/^image\//);
-
-      // Create an actual browser image so HTTP success alone cannot hide decode corruption.
-      const decoded = await page.evaluate(async resourceUrl => {
-        const image = new Image();
-        image.src = resourceUrl;
-        await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('browser load timeout after 10000ms')), 10000);
-          image.addEventListener('load', () => {
-            clearTimeout(timer);
-            resolve();
-          }, { once: true });
-          image.addEventListener('error', () => {
-            clearTimeout(timer);
-            reject(new Error('browser image load error'));
-          }, { once: true });
-        });
-        if (typeof image.decode === 'function') await image.decode();
-        return { complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight };
-      }, url).catch(error => ({ error: error.message, complete: false, naturalWidth: 0, naturalHeight: 0 }));
-      const browserDiagnostic = `${transport} browserDecode=${decoded.error || 'ok'} ` +
-        `dimensions=${decoded.naturalWidth}x${decoded.naturalHeight}`;
-      console.log(`${prefix} shell image diagnostic: ${browserDiagnostic}`);
-      expect(decoded.error, `${prefix} shell image decode failure: ${browserDiagnostic}`).toBeUndefined();
-      expect(decoded.complete, `${prefix} shell image incomplete: ${browserDiagnostic}`).toBe(true);
-      expect(decoded.naturalWidth, `${prefix} shell image width failure: ${browserDiagnostic}`).toBeGreaterThan(0);
-      expect(decoded.naturalHeight, `${prefix} shell image height failure: ${browserDiagnostic}`).toBeGreaterThan(0);
+// Discover all site media across all pages, deduplicate it, then request each URL once.
+test('media integrity audit', { tag: '@desktop-only' }, async ({ page, request }, testInfo) => {
+  const mediaByUrl = new Map();
+  for (const pageCase of primaryPages) {
+    await progressStep(testInfo, pageCase.path, 'collect media', async () => {
+      const response = await page.goto(pageCase.path, { waitUntil: 'domcontentloaded' });
+      expect(response?.status()).toBe(200);
+      for (const entry of await collectInternalMedia(page)) {
+        const previous = mediaByUrl.get(entry.url);
+        expect(previous?.kind ?? entry.kind, `conflicting media kind for ${entry.url}`).toBe(entry.kind);
+        mediaByUrl.set(entry.url, entry);
+      }
     });
   }
+
+  const failures = [];
+  for (const entry of mediaByUrl.values()) {
+    await progressStep(testInfo, '/', `media HTTP: ${new URL(entry.url).pathname}`, async () => {
+      const startedAt = performance.now();
+      try {
+        const response = await request.get(entry.url, { failOnStatusCode: false });
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        const contentType = response.headers()['content-type'] || '<missing>';
+        const contentLength = response.headers()['content-length'] || '<missing>';
+        const expectedPrefix = entry.kind === 'video' ? 'video/' : 'image/';
+        if (response.status() !== 200 || !contentType.toLowerCase().startsWith(expectedPrefix)) {
+          failures.push(`URL=${entry.url} status=${response.status()} Content-Type=${contentType} expected=${expectedPrefix}*`);
+        }
+        if (shellImagePaths.some(path => entry.url.endsWith(path))) {
+          const decoded = await page.evaluate(async resourceUrl => {
+            const image = new Image();
+            image.src = resourceUrl;
+            await new Promise((resolve, reject) => {
+              const timer = setTimeout(() => reject(new Error('browser load timeout after 10000ms')), 10000);
+              image.addEventListener('load', () => { clearTimeout(timer); resolve(); }, { once: true });
+              image.addEventListener('error', () => { clearTimeout(timer); reject(new Error('browser image load error')); }, { once: true });
+            });
+            if (typeof image.decode === 'function') await image.decode();
+            return { complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight };
+          }, entry.url);
+          const diagnostic = `URL=${entry.url} status=${response.status()} Content-Type=${contentType} ` +
+            `Content-Length=${contentLength} loadMs=${elapsedMs} browserDecode=ok ` +
+            `dimensions=${decoded.naturalWidth}x${decoded.naturalHeight}`;
+          console.log(`${diagnosticPrefix(testInfo, '/')} shell image diagnostic: ${diagnostic}`);
+          expect(decoded.complete, diagnostic).toBe(true);
+          expect(decoded.naturalWidth, diagnostic).toBeGreaterThan(0);
+          expect(decoded.naturalHeight, diagnostic).toBeGreaterThan(0);
+        }
+      } catch (error) {
+        failures.push(`URL=${entry.url} reason=${error.message}`);
+      }
+    });
+  }
+  expect(failures, failures.join('\n')).toEqual([]);
+});
+
+// The navigation switches to its mobile drawer through 1023px and desktop mode at 1024px.
+test('responsive breakpoint sanity', { tag: '@desktop-only' }, async ({ page }, testInfo) => {
+  for (const width of [767, 768, 1023, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const pageCase of primaryPages) {
+      await progressStep(testInfo, pageCase.path, `breakpoint ${width}px`, async () => {
+        const response = await page.goto(pageCase.path, { waitUntil: 'domcontentloaded' });
+        expect(response?.status()).toBe(200);
+        const state = await page.evaluate(() => {
+          const root = document.documentElement;
+          const body = document.body;
+          const nav = document.querySelector('nav[data-navigation]');
+          const toggle = document.querySelector('[data-menu-toggle]');
+          return {
+            overflow: root.scrollWidth > root.clientWidth + 1 || body.scrollWidth > body.clientWidth + 1,
+            navAttached: Boolean(nav),
+            navDisplay: nav ? getComputedStyle(nav).display : 'none',
+            toggleDisplay: toggle ? getComputedStyle(toggle).display : 'none',
+          };
+        });
+        expect(state.overflow, `${pageCase.path} overflows at ${width}px`).toBe(false);
+        expect(state.navAttached, `${pageCase.path} navigation missing at ${width}px`).toBe(true);
+        expect(state.navDisplay, `${pageCase.path} navigation unavailable at ${width}px`).not.toBe('none');
+        if (width <= 1023) expect(state.toggleDisplay, `mobile menu hidden at ${width}px`).not.toBe('none');
+        else expect(state.toggleDisplay, `desktop menu toggle visible at ${width}px`).toBe('none');
+      });
+    }
+  }
+});
+
+// Firefox deliberately receives only a fast cross-engine compatibility signal.
+test('Firefox engine sanity', { tag: '@engine-smoke' }, async ({ page }, testInfo) => {
+  const runtime = watchPage(page, testInfo, '/');
+  const response = await progressStep(testInfo, '/', 'engine navigation', () =>
+    page.goto('/', { waitUntil: 'domcontentloaded' })
+  );
+  expect(response?.status()).toBe(200);
+  expect((await page.title()).trim().length).toBeGreaterThan(0);
+  await expect(page.locator('nav[data-navigation]')).toBeAttached();
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 ||
+    document.body.scrollWidth > document.body.clientWidth + 1
+  );
+  expect(overflow).toBe(false);
+  await page.locator('nav[data-navigation] a[href="/products/"]').click();
+  await expect(page).toHaveURL(/\/products\/$/);
+  expect(runtime.pageErrors, runtime.pageErrors.join('\n')).toEqual([]);
 });
