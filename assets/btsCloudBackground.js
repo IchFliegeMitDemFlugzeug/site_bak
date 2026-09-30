@@ -927,8 +927,8 @@ export function mountBTSCloudBackground(container, userOptions = {}) {
   const mobileLike =
     window.matchMedia('(pointer: coarse)').matches;
 
-  // На телефоне 24 кадра/с более чем достаточно:
-  // облака двигаются очень медленно.
+  // На телефоне 15 кадр/с достаточно для очень медленного движения облаков
+  // и заметно снижает постоянную нагрузку на мобильный GPU.
   const targetFPS =
     mobileLike ? 15 : 30;
 
@@ -937,7 +937,8 @@ export function mountBTSCloudBackground(container, userOptions = {}) {
     1000 / targetFPS;
 
   // На Retina-телефонах нет смысла безусловно считать DPR=3–4.
-  // DPR=2 для настолько мягкого изображения визуально практически неотличим.
+  // DPR=1.5 для настолько мягкого изображения сохраняет визуальный характер
+  // и уменьшает число рассчитываемых пикселей на Retina-экранах.
   const maxDPR =
     mobileLike ? 1.5 : 2.0;
 
