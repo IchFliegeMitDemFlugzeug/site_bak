@@ -384,6 +384,11 @@ a[href^="mailto:"] {
   min-width: 0;
 }
 
+/* Section Header единолично управляет вертикальным ритмом своих частей. */
+.c-section-header > * {
+  margin-block: 0;
+}
+
 .c-feature-list {
   display: grid;
   gap: var(--ds-space-4);
@@ -522,7 +527,9 @@ a[href^="mailto:"] {
 
 :is(
   [data-component~="C-MEDIA"][data-media-crop="allow"] > img,
-  [data-component~="C-MEDIA"][data-media-crop="cover"] > video
+  [data-component~="C-MEDIA"][data-media-crop="allow"] > video,
+  img[data-media-crop="allow"],
+  video[data-media-crop="allow"]
 ) {
   object-fit: cover;
 }
@@ -643,6 +650,11 @@ a[href^="mailto:"] {
   background: transparent;
 }
 
+/* Заголовок и первый контент Gallery разделяет один системный шаг. */
+:where(.p-gallery, [data-pattern~="S-GALLERY"]) [data-slot="header"] + :is([data-slot="media"], [data-slot="items"]) {
+  margin-block-start: var(--ds-space-7);
+}
+
 /* Media-contained использует двенадцатиколоночную системную сетку: основное
    фото и превью занимают восемь колонок, а модель — шесть. */
 @media (min-width: 768px) {
@@ -665,17 +677,18 @@ a[href^="mailto:"] {
   }
 }
 
-/* У карточек с выровненной копией текстовая зона получает системный padding,
-   а заголовок резервирует одинаковую трёхстрочную область перед описанием. */
+/* Subgrid образует общие ряды media, heading и body без искусственной высоты. */
 [data-pattern~="S-GALLERY"][data-variants~="aligned-card-copy"] .gallery-grid--aligned-copy > .gallery-item {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
 }
 
 [data-pattern~="S-GALLERY"][data-variants~="aligned-card-copy"] .gallery-grid--aligned-copy figcaption {
   display: grid;
-  grid-template-rows: minmax(var(--ds-space-11), auto) auto;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
   gap: var(--ds-space-4);
   padding: var(--ds-space-6);
 }
@@ -688,6 +701,16 @@ a[href^="mailto:"] {
    mobile-правило конструктора ниже по файлу по-прежнему складывает их в одну. */
 [data-pattern~="S-METRICS"][data-variants~="metric-pair"] .metric-pair {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* MetricPair масштабирует обе метрики по ширине их равных карточек. */
+[data-pattern~="S-METRICS"][data-variants~="metric-pair"] .metric-pair > .c-metric-card {
+  container-type: inline-size;
+}
+
+[data-pattern~="S-METRICS"][data-variants~="metric-pair"] .metric-pair [data-type="T-METRIC"] {
+  font-size: clamp(var(--type-display-m-size), 18cqi, var(--type-metric-size));
+  white-space: nowrap;
 }
 
 /* Text-gallery-aside — общий вариант EditorialMedia: слева Stack с компактной
@@ -869,6 +892,7 @@ a[href^="mailto:"] {
 
 [data-pattern~="S-CTA"][data-variants~="copy-right"] [data-slot="layout"] {
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  align-items: start;
 }
 
 [data-variants~="media-left"] [data-slot="layout"],
@@ -1108,6 +1132,12 @@ a[href^="mailto:"] {
   :where(.p-specs, [data-pattern~="S-SPECS"]) [data-slot="items"],
   :where(.p-cta, [data-pattern~="S-CTA"]) [data-slot="layout"] {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-pattern~="S-GALLERY"][data-variants~="aligned-card-copy"] .gallery-grid--aligned-copy > .gallery-item,
+  [data-pattern~="S-GALLERY"][data-variants~="aligned-card-copy"] .gallery-grid--aligned-copy figcaption {
+    grid-row: auto;
+    grid-template-rows: auto;
   }
 
   .c-gallery,

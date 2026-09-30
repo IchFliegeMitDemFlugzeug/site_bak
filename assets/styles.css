@@ -15,7 +15,7 @@
   --space-5: 40px;
   --space-6: var(--ds-space-7);
   --space-8: var(--ds-space-8);
-  --section-pad: clamp(var(--ds-space-8), 7svh, var(--section-padding-y-desktop));
+  --section-pad: var(--section-padding-y);
   --media-tile-h: clamp(220px, 28svh, 300px);
   --media-feature-h: clamp(300px, 42svh, 420px);
   --copy-measure: 68ch;
@@ -325,12 +325,10 @@ summary:focus-visible {
 .future-visual span:last-child { left: 8%; right: 8%; top: 50%; }
 .future-visual--tall { height: clamp(220px, 30svh, 300px); }
 .production-section { background: var(--paper); }
-.production-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-6); margin-top: var(--space-5); align-items: start; }
-.production-media { display: grid; grid-template-columns: 1fr; gap: 0; align-content: start; background: transparent; }
-.production-media .image-card { min-height: 190px; }
-.production-media .image-card--large { min-height: 300px; }
+.production-layout { margin-top: var(--space-5); }
+.production-media { background: transparent; }
 .start-section { background: #dce2e8; }
-.start-layout { display: grid; grid-template-columns: 1.25fr .75fr; gap: clamp(60px, 8vw, 130px); align-items: end; }
+.start-layout { display: grid; }
 .start-layout__body { max-width: 520px; padding-bottom: 10px; }
 .start-layout__body .primary-button { margin: 22px 0; }
 
@@ -438,7 +436,7 @@ summary:focus-visible {
 .section-dark .eyebrow,
 .section-dark .gallery-item figcaption { color: #9199a1; }
 .section-dark .image-card { background: #1b1e22; }
-.section-intro > .body-lead { max-width: 760px; margin: var(--space-4) 0 0 30%; }
+.section-intro > .body-lead { max-width: 760px; }
 .system-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: var(--space-6); margin-top: var(--space-5); align-items: center; }
 .system-grid .video-frame { width: min(100%, 460px); justify-self: center; }
 .layer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-top: var(--space-5); background: transparent; }
@@ -773,8 +771,6 @@ summary:focus-visible {
   .nav-backdrop { position: fixed; z-index: 79; inset: 0; display: block; background: rgba(9,11,13,.36); opacity: 0; pointer-events: none; transition: opacity .3s ease; }
   .nav-backdrop.is-visible { opacity: 1; pointer-events: auto; }
   .split-copy,
-  .start-layout,
-  .production-layout,
   .system-grid,
   .media-copy-grid,
   .media-copy-grid--reverse,
@@ -783,7 +779,6 @@ summary:focus-visible {
   .split-copy__body { padding-top: 0; }
   .responsibility__statement,
   .responsibility__details,
-  .section-intro > .body-lead,
   .neck-copy,
   .prototype-copy,
   .testing-note,
@@ -791,7 +786,6 @@ summary:focus-visible {
   .result-grid { grid-template-columns: 1fr; }
   .result-card { min-height: 340px; grid-template-rows: 22px 92px minmax(96px, 1fr) auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .result-card:last-child { border-bottom: 0; }
-  .production-media .image-card--large { min-height: 300px; }
   .product-hero { grid-template-columns: 1fr; background: radial-gradient(circle at 50% 82%, rgba(188,198,207,.52), transparent 32%), var(--bg); }
   .product-hero__copy { padding: 140px 5vw 42px; }
   .product-hero__copy .body-lead { margin-top: 34px; }
@@ -821,7 +815,6 @@ summary:focus-visible {
   :root {
     --header-h: 72px;
     --page: calc(100vw - var(--page-side-padding) - var(--page-side-padding));
-    --section-pad: 64px;
     --media-tile-h: 280px;
     --media-feature-h: 320px;
   }
@@ -844,14 +837,11 @@ summary:focus-visible {
   .result-card p { margin: 18px 0; }
   .future-visual,
   .future-visual--tall { height: 240px; margin-top: var(--space-4); }
-  .production-media { grid-template-columns: 1fr; }
-  .production-media .image-card--large { grid-column: auto; min-height: 360px; }
   .product-subnav { top: 90px; padding: 11px 16px; }
   .product-hero { min-height: auto; padding-top: 0; }
   .product-hero__copy { padding: 116px 5vw 34px; }
   .product-hero__copy .body-lead { margin-top: 28px; }
   .product-hero__media { width: min(76vw, 360px); min-height: 0; margin-bottom: 48px; }
-  .section-intro > .body-lead { margin-top: 38px; }
   .layer-card .image-card { height: auto; min-height: 0; aspect-ratio: 4 / 3; }
   .layer-card > span,
   .layer-card h3,
