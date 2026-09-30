@@ -194,6 +194,11 @@ async function findBrokenVideos(page, testInfo, pagePath) {
     await video.scrollIntoViewIfNeeded();
     try {
       const result = await video.evaluate(async element => {
+        // Production intentionally keeps MP4 in data-src until the video approaches the viewport.
+        // Hydrate it explicitly here so the media test remains deterministic.
+        if (!element.getAttribute('src') && element.dataset.src) {
+          element.src = element.dataset.src;
+        }
         element.preload = 'metadata';
         // Start an untouched video, but never restart an in-flight request and create a false requestfailed.
         if (element.networkState === HTMLMediaElement.NETWORK_EMPTY) element.load();
@@ -250,7 +255,7 @@ async function collectInternalMedia(page) {
       add(element.currentSrc || element.src, 'image');
     });
     document.querySelectorAll('video').forEach(element => {
-      add(element.currentSrc || element.src, 'video');
+      add(element.currentSrc || element.src || element.dataset.src, 'video');
       add(element.poster, 'image');
     });
     document.querySelectorAll('source[src]').forEach(element => {
