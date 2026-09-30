@@ -56,6 +56,9 @@ await cp("404.html", "dist/404.html");
 await cp("robots.txt", "dist/robots.txt");
 await cp("sitemap.xml", "dist/sitemap.xml");
 
+// Копируем общее Open Graph-превью для всех страниц сайта.
+await cp("bts-og-preview-1200x630.png", "dist/bts-og-preview-1200x630.png");
+
 // Копируем файлы подтверждения прав на сайт для поисковых сервисов.
 await cp("mailru-verificationfc8f8bca4c54a0bd.html", "dist/mailru-verificationfc8f8bca4c54a0bd.html");
 await cp("yandex_2b6b54d15f078bc5.html", "dist/yandex_2b6b54d15f078bc5.html");
