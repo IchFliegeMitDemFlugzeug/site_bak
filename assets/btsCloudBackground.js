@@ -1042,8 +1042,12 @@ export function mountBTSCloudBackground(container, userOptions = {}) {
   // Отрисовываем один кадр.
   function render() {
 
-    // Проверяем/обновляем физическое разрешение.
-    resizeCanvas();
+    // Размер framebuffer меняется только при реальном resize через ResizeObserver.
+    // Не читаем layout на каждом кадре: getBoundingClientRect() здесь вызывал
+    // лишние Style/Layout пересчёты во время непрерывной WebGL-анимации.
+    if (canvas.width <= 0 || canvas.height <= 0) {
+      return;
+    }
 
     // Передаём разрешение в шейдер.
     gl.uniform2f(
@@ -1271,6 +1275,9 @@ export function mountBTSCloudBackground(container, userOptions = {}) {
     handleReducedMotionChange
   );
 
+
+  // Один раз рассчитываем framebuffer до первого кадра.
+  resizeCanvas();
 
   // Рисуем первый кадр сразу,
   // чтобы Canvas никогда не был пустым при загрузке.

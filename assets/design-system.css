@@ -44,8 +44,9 @@
   --color-paper: #f8f9fa;
   --color-white: #ffffff;
   --color-ink: #0d0e10;
-  --color-muted: #6e7680;
+  --color-muted: #646c75;
   --color-metal: #747d87;
+  --color-metal-on-accent: #5f6872;
   --color-copy-secondary: #515860;
   --color-wet-asphalt: #4b5157;
   --color-wet-asphalt-strong: #383d42;
@@ -851,6 +852,7 @@ a[href^="mailto:"] {
 :where([data-theme="accent-light"], .theme-accent-light) {
   --section-background: var(--color-accent);
   --section-foreground: var(--color-ink);
+  --metal: var(--color-metal-on-accent);
 }
 
 :where([data-theme="light-gradient"], .theme-light-gradient) {
