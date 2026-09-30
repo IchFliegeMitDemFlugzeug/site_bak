@@ -20,7 +20,7 @@ BASE_URL = "https://btsys.ru"
 
 # Изображение, которое сейчас будет использоваться в превью ссылок.
 # Это существующее изображение бака, уже находящееся в опубликованной сборке.
-OG_IMAGE = f"{BASE_URL}/bts-og-preview-1200x630.png?v=2"
+OG_IMAGE = f"{BASE_URL}/assets/social/bts-og-20261001.png"
 
 # Общее название сайта для Open Graph.
 SITE_NAME = "БТС — Бортовые топливные системы"
@@ -99,7 +99,7 @@ def update_html(file_path: Path, canonical_url: str) -> None:
   <meta property="og:title" content="{safe_title}">
   <meta property="og:description" content="{safe_description}">
   <meta property="og:url" content="{canonical_url}">
-  <meta property="og:image" content="{OG_IMAGE}">
+  <link rel="image_src" href="{OG_IMAGE}">\n  <meta property="og:image" content="{OG_IMAGE}">\n  <meta property="og:image:url" content="{OG_IMAGE}">
   <meta property="og:image:secure_url" content="{OG_IMAGE}">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
@@ -109,7 +109,7 @@ def update_html(file_path: Path, canonical_url: str) -> None:
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{safe_title}">
   <meta name="twitter:description" content="{safe_description}">
-  <meta name="twitter:image" content="{OG_IMAGE}">
+  <meta name="twitter:image" content="{OG_IMAGE}">\n  <meta name="twitter:image:src" content="{OG_IMAGE}">
   <meta name="twitter:image:alt" content="БТС — мягкие топливные баки для БПЛА">
   {SEO_END}
 """
@@ -177,10 +177,22 @@ for relative_path, canonical_url in PAGES.items():
 
 
 # Формируем robots.txt.
-robots_text = f"""User-agent: *
+robots_text = f"""User-agent: TelegramBot
 Allow: /
 
-Sitemap: {BASE_URL}/sitemap.xml
+User-agent: WebpageBot
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: WhatsApp
+Allow: /
+
+User-agent: *
+Allow: /
+
+Sitemap: https://btsys.ru/sitemap.xml
 """
 
 # Сохраняем robots.txt в корень исходного проекта.
