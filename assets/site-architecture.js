@@ -76,7 +76,7 @@
     'MEDIA-PRODUCTS-03-EDGE-MACRO': { type: 'photo', src: '/assets/media/shell-edge.webp', openable: true, crop: 'allow', width: 2048, height: 1365 },
     'MEDIA-PRODUCTS-04-VIDEO-CATIA': { type: 'video', src: '/assets/media/catia-rotation.mp4', openable: false, crop: 'contain', role: 'M-STANDARD' },
     'MEDIA-PRODUCTS-05-01': { type: 'photo', src: '/assets/media/neck-open.webp', openable: true, crop: 'allow', width: 2048, height: 1365 },
-    'MEDIA-PRODUCTS-05-02': { type: 'photo', src: '/assets/media/neck-parts.webp', openable: true, crop: 'allow', width: 2048, height: 1638 },
+    'MEDIA-PRODUCTS-05-02': { type: 'photo', src: '/assets/media/neck-parts.webp', openable: true, crop: 'deny', width: 2048, height: 1638 },
     'MEDIA-PRODUCTS-05-03': { type: 'photo', src: '/assets/media/neck-assembled.webp', openable: true, crop: 'allow', width: 2048, height: 1365 },
     'MEDIA-PRODUCTS-06-01': { type: 'photo', src: '/assets/media/airframe-bay-a.webp', openable: true, crop: 'allow', width: 1537, height: 2048 },
     'MEDIA-PRODUCTS-06-02': { type: 'photo', src: '/assets/media/airframe-bay-b.webp', openable: true, crop: 'allow' },
