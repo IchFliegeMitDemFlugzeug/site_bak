@@ -358,10 +358,19 @@ test('FAQ details opens', { tag: '@mobile-interaction' }, async ({ page }, testI
   const prefix = diagnosticPrefix(testInfo, '/faq/');
   await progressStep(testInfo, '/faq/', 'navigation', () => page.goto('/faq/', { waitUntil: 'domcontentloaded' }));
   await progressStep(testInfo, '/faq/', 'FAQ', async () => {
-    const closedDetails = page.locator('details:not([open])').first();
+    // Resolve the first closed item to an index before clicking, because :not([open]) changes its match after the click.
+    const closedDetailsIndex = await page.locator('details').evaluateAll(details =>
+      details.findIndex(detail => !detail.hasAttribute('open'))
+    );
+    // Require a real closed FAQ item before creating the stable index-based locator.
+    expect(closedDetailsIndex, `${prefix} no closed FAQ details found`).toBeGreaterThanOrEqual(0);
+    // Keep pointing at the same DOM position even after the element gains its open attribute.
+    const closedDetails = page.locator('details').nth(closedDetailsIndex);
     await expect(closedDetails, `${prefix} no closed FAQ details found`).toBeAttached();
     await closedDetails.locator('summary').click();
     await expect(closedDetails, `${prefix} FAQ details did not open`).toHaveAttribute('open', '');
+    // Verify the answer belonging to that exact details element is actually revealed to the user.
+    await expect(closedDetails.locator(':scope > :not(summary)').first(), `${prefix} FAQ answer is not visible`).toBeVisible();
   });
 });
 
@@ -419,31 +428,59 @@ test('contact dialog stays inside mobile viewport', { tag: '@mobile-interaction'
         dialogOverflowY: getComputedStyle(dialogElement).overflowY,
         shellTransform: getComputedStyle(shellElement).transform,
         inputFontSize: Number.parseFloat(getComputedStyle(inputElement).fontSize),
+        dialogScrollTop: dialogElement.scrollTop,
+        dialogScrollHeight: dialogElement.scrollHeight,
+        dialogClientHeight: dialogElement.clientHeight,
       };
     });
-    const assertState = state => {
-      const tolerance = 1;
+    // Keep the existing one-pixel horizontal tolerance for fractional browser geometry.
+    const tolerance = 1;
+    // Check viewport ownership and horizontal containment without requiring tall content to fit vertically.
+    const assertViewportAndHorizontalState = state => {
       expect(state.dialog.left, `${prefix} dialog left outside viewport`).toBeGreaterThanOrEqual(-tolerance);
       expect(state.dialog.top, `${prefix} dialog top outside viewport`).toBeGreaterThanOrEqual(-tolerance);
       expect(state.dialog.right, `${prefix} dialog right outside viewport`).toBeLessThanOrEqual(state.viewportWidth + tolerance);
       expect(state.dialog.bottom, `${prefix} dialog bottom outside viewport`).toBeLessThanOrEqual(state.viewportHeight + tolerance);
       expect(state.shell.left, `${prefix} shell left outside dialog`).toBeGreaterThanOrEqual(state.dialog.left - tolerance);
-      expect(state.shell.top, `${prefix} shell top outside dialog`).toBeGreaterThanOrEqual(state.dialog.top - tolerance);
       expect(state.shell.right, `${prefix} shell right outside dialog`).toBeLessThanOrEqual(state.dialog.right + tolerance);
-      expect(state.shell.bottom, `${prefix} shell bottom outside dialog`).toBeLessThanOrEqual(state.dialog.bottom + tolerance);
       expect(state.form.left, `${prefix} form left outside shell`).toBeGreaterThanOrEqual(state.shell.left - tolerance);
-      expect(state.form.top, `${prefix} form top outside shell`).toBeGreaterThanOrEqual(state.shell.top - tolerance);
       expect(state.form.right, `${prefix} form right outside shell`).toBeLessThanOrEqual(state.shell.right + tolerance);
-      expect(state.form.bottom, `${prefix} form bottom outside shell`).toBeLessThanOrEqual(state.shell.bottom + tolerance);
+    };
+    // At scroll position zero, both the shell start and the form start must remain reachable.
+    const assertTopIsAccessible = state => {
+      expect(state.shell.top, `${prefix} shell top outside dialog`).toBeGreaterThanOrEqual(state.dialog.top);
+      expect(state.form.top, `${prefix} form top outside shell`).toBeGreaterThanOrEqual(state.shell.top);
     };
     const beforeFocus = await readState();
-    assertState(beforeFocus);
+    assertViewportAndHorizontalState(beforeFocus);
+    assertTopIsAccessible(beforeFocus);
     expect(beforeFocus.rootOverflow, `${prefix} unexpected root scroll lock`).not.toBe('hidden');
     expect(beforeFocus.dialogOverflowY, `${prefix} dialog does not own vertical scrolling`).toBe('auto');
     expect(beforeFocus.shellTransform, `${prefix} translated mobile dialog shell`).toBe('none');
     expect(beforeFocus.inputFontSize, `${prefix} input can trigger iOS zoom`).toBeGreaterThanOrEqual(16);
     await firstInput.click();
-    assertState(await readState());
+    const afterFocus = await readState();
+    assertViewportAndHorizontalState(afterFocus);
+    assertTopIsAccessible(afterFocus);
+
+    // This long mobile form must overflow the dialog so the scrolling contract is exercised rather than assumed.
+    expect(afterFocus.dialogScrollHeight, `${prefix} dialog content does not overflow vertically`).toBeGreaterThan(afterFocus.dialogClientHeight);
+    // Ask the dialog scroll container to move to its maximum vertical position.
+    await dialog.evaluate(element => element.scrollTop = element.scrollHeight);
+    // Let Playwright retry until the browser has applied the scroll position, without using a fixed sleep.
+    await expect.poll(async () => (await readState()).dialogScrollTop, `${prefix} dialog did not scroll down`).toBeGreaterThan(0);
+    const afterScroll = await readState();
+    assertViewportAndHorizontalState(afterScroll);
+    // At the maximum scroll position, the form's bottom must be reachable inside the dialog viewport.
+    expect(afterScroll.form.bottom, `${prefix} form bottom is not reachable`).toBeLessThanOrEqual(afterScroll.dialog.bottom);
+    expect(afterScroll.form.bottom, `${prefix} form bottom scrolled above dialog`).toBeGreaterThan(afterScroll.dialog.top);
+
+    // Return to the start and verify that the top of the same content is reachable again.
+    await dialog.evaluate(element => element.scrollTop = 0);
+    await expect.poll(async () => (await readState()).dialogScrollTop, `${prefix} dialog did not return to top`).toBe(0);
+    const afterReset = await readState();
+    assertViewportAndHorizontalState(afterReset);
+    assertTopIsAccessible(afterReset);
   });
 });
 
