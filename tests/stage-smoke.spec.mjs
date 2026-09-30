@@ -365,28 +365,31 @@ test('mobile first screen defers video downloads', { tag: '@mobile-interaction' 
     if (/\.mp4(?:$|\?)/i.test(request.url())) mp4Requests.push(request.url());
   });
 
-  await progressStep(testInfo, '/', 'mobile first-load video deferral', async () => {
-    await page.goto('/', { waitUntil: 'load' });
-    await expect(page.locator('.hero')).toBeVisible();
+  for (const path of ['/', '/products/']) {
+    await progressStep(testInfo, path, 'mobile first-load video deferral', async () => {
+      mp4Requests.length = 0;
+      await page.goto(path, { waitUntil: 'load' });
+      await expect(page.locator('main')).toBeVisible();
 
-    // Give IntersectionObserver and the browser two paint cycles without introducing a time-based sleep.
-    await page.evaluate(() => new Promise(resolve => {
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
-    }));
+      // Give IntersectionObserver and the browser two paint cycles without introducing a time-based sleep.
+      await page.evaluate(() => new Promise(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }));
 
-    expect(mp4Requests, `unexpected MP4 requests before scrolling:\n${mp4Requests.join('\n')}`).toEqual([]);
+      expect(mp4Requests, `unexpected MP4 requests before scrolling on ${path}:\n${mp4Requests.join('\n')}`).toEqual([]);
 
-    const videos = page.locator('video[data-smart-video]');
-    const count = await videos.count();
-    expect(count).toBeGreaterThan(0);
+      const videos = page.locator('video[data-smart-video]');
+      const count = await videos.count();
+      expect(count).toBeGreaterThan(0);
 
-    for (let index = 0; index < count; index += 1) {
-      const video = videos.nth(index);
-      await expect(video).not.toHaveAttribute('src', /.+/);
-      await expect(video).toHaveAttribute('data-src', /\.mp4$/);
-      await expect(video).toHaveAttribute('preload', 'none');
-    }
-  });
+      for (let index = 0; index < count; index += 1) {
+        const video = videos.nth(index);
+        await expect(video).not.toHaveAttribute('src', /.+/);
+        await expect(video).toHaveAttribute('data-src', /\.mp4$/);
+        await expect(video).toHaveAttribute('preload', 'none');
+      }
+    });
+  }
 });
 
 // Keep the focused interaction regressions on the two primary phones only.
