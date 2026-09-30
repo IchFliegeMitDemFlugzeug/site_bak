@@ -284,9 +284,9 @@
 :is([data-block-id], [data-component]) :is(h1, h2, h3, p, li, summary, a, span) {
   min-width: 0;
   max-width: 100%;
-  overflow-wrap: break-word;
+  overflow-wrap: normal;
   word-break: normal;
-  hyphens: auto;
+  hyphens: none;
 }
 
 /* Display-роли масштабируются по собственной колонке, поэтому заголовки не
@@ -294,7 +294,7 @@
 :is([data-block-id], [data-component]) :is(h1, h2, h3),
 :is([data-block-id], [data-component]) :is(h1, h2, h3) :is(span, a) {
   overflow-wrap: normal;
-  hyphens: manual;
+  hyphens: none;
 }
 
 /* Тональная часть заголовка получает собственную доступную ширину: она может
@@ -307,6 +307,40 @@
 
 a[href^="mailto:"] {
   overflow-wrap: anywhere;
+}
+
+/* Векторная стрелка без Unicode-эмодзи: одинаково выглядит в Safari/iOS, Android и desktop. */
+.icon-arrow-up-right {
+  position: relative;
+  display: inline-block;
+  width: .82em;
+  height: .82em;
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
+.icon-arrow-up-right::before {
+  content: "";
+  position: absolute;
+  left: .08em;
+  bottom: .08em;
+  width: .72em;
+  height: .1em;
+  border-radius: 999px;
+  background: currentColor;
+  transform: rotate(-45deg);
+  transform-origin: left center;
+}
+
+.icon-arrow-up-right::after {
+  content: "";
+  position: absolute;
+  top: .03em;
+  right: .03em;
+  width: .38em;
+  height: .38em;
+  border-top: .1em solid currentColor;
+  border-right: .1em solid currentColor;
 }
 
 /* Служебный заголовок остаётся в дереве доступности без визуального габарита. */

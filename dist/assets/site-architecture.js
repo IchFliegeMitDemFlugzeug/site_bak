@@ -508,7 +508,7 @@
       ['.service-note, .testing-note, .gallery-item figcaption, .result-card > span, .layer-card > span, .thickness-feature > div > span', 'T-NOTE'],
       ['.result-card strong', 'T-BODY'],
       ['.contact-page__facts span', 'T-BODY-S'],
-      ['.contact-details a[href^="mailto:"]', 'T-DISPLAY-M'],
+      ['.contact-details a:is([href^="mailto:"], [href^="tel:"])', 'T-DISPLAY-M'],
     ];
 
     roleSelectors.forEach(([selector, role]) => {
